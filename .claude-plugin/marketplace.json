@@ -1,0 +1,14 @@
+{
+  "name": "becise-skills",
+  "owner": {
+    "name": "Becise",
+    "email": "luke@becise.com"
+  },
+  "plugins": [
+    {
+      "name": "example-skill",
+      "source": "./plugins/example-skill",
+      "description": "Example plugin — replace or remove once real plugins are added."
+    }
+  ]
+}
