@@ -4,14 +4,33 @@ Claude Code plugin marketplace. Hosts plugins (mostly skills) installable via `/
 
 ## Add this marketplace
 
+This repo is private — auth required. Same commands work in Claude Code CLI, the Claude Code panel inside Claude Desktop, and the VS Code/JetBrains extensions (all share `~/.claude/` config).
+
+**SSH** (if your key is already set up on GitHub):
 ```bash
-/plugin marketplace add becise/becise-skills
+/plugin marketplace add git@github.com:becise/becise-skills.git
 ```
 
-(or the local path / git URL if not on GitHub yet). Then install a plugin:
+**HTTPS** (needs a git credential helper already configured, e.g. via `gh auth login`):
+```bash
+/plugin marketplace add https://github.com/becise/becise-skills.git
+```
+
+**Local path** (no auth, no auto-update — good for solo/local use):
+```bash
+/plugin marketplace add /absolute/path/to/becise-skills
+```
+
+Then install a plugin:
 
 ```bash
 /plugin install example-skill@becise-skills
+```
+
+Pick up new/updated skills later with:
+
+```bash
+/plugin marketplace update becise-skills
 ```
 
 ## Repo layout
