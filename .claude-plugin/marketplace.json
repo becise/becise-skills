@@ -6,9 +6,9 @@
   },
   "plugins": [
     {
-      "name": "example-skill",
-      "source": "./plugins/example-skill",
-      "description": "Example plugin — replace or remove once real plugins are added."
+      "name": "becise",
+      "source": "./plugins/becise",
+      "description": "Rebuild any chart from any source (slide, PDF, dashboard, screenshot) via the Becise MCP, show it live, and place it into Slides/Docs or export as PNG."
     }
   ]
 }

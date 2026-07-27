@@ -24,7 +24,7 @@ This repo is private — auth required. Same commands work in Claude Code CLI, t
 Then install a plugin:
 
 ```bash
-/plugin install example-skill@becise-skills
+/plugin install becise@becise-skills
 ```
 
 Pick up new/updated skills later with:
@@ -107,6 +107,9 @@ plugins/
 
 5. **Commit and push.** Anyone with the marketplace already added picks up new/updated skills via `/plugin marketplace update becise-skills`.
 
-## Removing the example
+## After installing: connect the Becise MCP server
 
-`plugins/example-skill/` is a template — delete it (and its entry in `marketplace.json`) once real plugins exist.
+The `becise` plugin's skills call the Becise MCP server (tool `chart_critique`). That server is a
+separate custom connector — the plugin does not bundle it. In Claude Desktop: **Settings →
+Connectors → Add custom connector**, paste the Becise MCP URL, and authenticate with the provided
+credentials. Confirm with *"Do you have the Becise chart tools available?"*
