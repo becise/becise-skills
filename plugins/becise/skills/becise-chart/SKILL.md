@@ -51,7 +51,8 @@ that each start at `chart1` collide when merged, and Step 3 refuses duplicates.
 
 **Big sources:** triage cheap metadata first (Slides `get_presentation` text, a PDF's extracted
 text) to drop title/text/table pages, then eyeball only candidates; montage many views into one
-contact sheet rather than reading each. **If nothing is chartable, stop** and say so.
+contact sheet rather than reading each. **If the user named the view** ("the chart on slide 5"),
+skip triage entirely and go straight to that one. **If nothing is chartable, stop** and say so.
 
 ## Step 1 — Ingest: a fetchable image per view
 
@@ -59,6 +60,7 @@ contact sheet rather than reading each. **If nothing is chartable, stop** and sa
 | --- | --- |
 | Google Slides | `get_page_thumbnail` (`LARGE`) — pass its URL straight through, it's server-fetchable |
 | PDF / doc | render the page to PNG (below) |
+| Local Office file (`.pptx`/`.key`/`.docx`) | convert to PDF first (below), then render the page |
 | Image / screenshot / dashboard | use as-is |
 | Webpage | screenshot the region (claude-in-chrome) |
 
@@ -70,6 +72,22 @@ URL, not a path; a huge file may return base64-in-JSON → `jq -r .content | bas
 `get_upload_url` → `PUT` the bytes (`Content-Type: image/png`; plain `--data-binary`, ignore the
 `crc32` param) → use the returned `downloadUrl`. **Presigned URLs expire ~300s** — call
 `chart_critique` immediately, and mint a fresh one for any retry.
+
+**Office file → PDF.** Also **check, never assume**: `which soffice ; ls -d /Applications/Keynote.app`
+
+- **`soffice --headless --convert-to pdf --outdir <dir> in.pptx`** wherever LibreOffice exists.
+- **macOS:** drive **Keynote** by AppleScript — it opens `.pptx` and exports PDF reliably, and it
+  ships on every Mac. `open POSIX file "…"` → `export … as PDF` → `close saving no`.
+- **Export to a user-visible dir (`~/Downloads`), never the scratchpad** — Keynote and PowerPoint are
+  OS-sandboxed and cannot write there. They report success and write nothing.
+
+Reach for a PowerPoint MCP or PowerPoint itself only after both fail; its AppleScript export is
+unreliable and its save verbs differ by version.
+
+**Verify every render.** `stat` the output before using it. Export tools — MCP wrappers especially —
+routinely return "success" while producing no file. Don't confirm by `find`-ing the filename: a stale
+file from an earlier export will match and send you a long way down the wrong path. Write to a fresh
+dir, or check mtime.
 
 **Rendering a PDF page.** Which renderer is present **varies by environment — check, never assume**:
 `which pdftoppm ; python3 -c "import fitz" 2>/dev/null && echo fitz-ok`

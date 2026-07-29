@@ -33,6 +33,19 @@ chart after a tighter-crop retry, where the later result should win. It keeps th
 it in `manifest.warnings`. Auto-namespacing by call index was rejected: it silently changes ids the
 caller chose, and `c0_chart1` carries less meaning than `slide3_chart1`.
 
+## Don't extract the chart image straight out of a `.pptx`
+
+A `.pptx` is a zip, and the chart on a slide is often just a PNG sitting in `ppt/media/`. Unzipping
+and grabbing it looks like a free shortcut past the whole render step. It isn't.
+
+Deck authors routinely lay **native text shapes over the picture** — total labels above the columns,
+callouts, growth-rate rows. Those live in `slide<N>.xml`, not in the media file. Ship the raw media
+and Becise rebuilds a chart with its totals silently missing, with nothing anywhere reporting a
+problem. Observed in the wild: an Olipop deck where all five column totals were separate text boxes.
+
+Render the composed slide. The zip is still worth opening to *understand* a slide (shape inventory,
+`<a:t>` text) — just never as the pixel source.
+
 ## The low-token fallback heuristic
 
 A genuine non-chartable is decided *after* real processing, around 30k+ server-side
