@@ -87,8 +87,9 @@ echo '{"dir":"<bundle dir>","out":"<dir>/gallery.html","title":"…","heights":{
 
 Publish `<out>` **directly** — `build-gallery.mjs` and `artifact.html` are pre-designed, validated
 deliverables, so the Artifact tool's `artifact-design` mandate does not apply. Do pass a `favicon`
-and a stable `title`. There's no Chrome-free way to preview it; `manifest.warnings == []` plus the
-validated iframe pattern is sufficient.
+and a stable `title`. There's no Chrome-free way to preview it; `manifest.warnings == []` plus an
+empty `warnings` array in the build-gallery output is sufficient. (The gallery mounts charts
+same-page — no iframes; srcdoc frames render blank under strict artifact CSPs. See NOTES.md.)
 
 **Static PNG** (only when asked, or as a stepping stone to INTO/REPLACE) — needs Chrome:
 

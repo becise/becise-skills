@@ -113,10 +113,20 @@ One `chart_critique` call **per source image**: that image's `url` plus every ch
 across views, keep each result. Poll `get_result` on `{state:"pending"}` (charts take 60–90s; tell
 the user it's running). Don't hand-save the HTML — Step 3 does it.
 
+**`get_result` dying with a transport error** ("MCP server connection lost" or similar) while the
+job runs is EXPECTED on long jobs — the proxy times out the long-poll before the server answers.
+It is not a failure and not worth reporting: call `get_result` again with the same `jobId`, as many
+times as it takes, until you get `done` or `error`.
+
 **Fallbacks with low `usage.inputTokens`** (a few k, vs ~30k+ for a real run) mean the image was
 barely processed, not that the chart is un-chartable. Retry that one chart ONCE with a tighter crop
 (`fitz` `clip` — the case that justifies installing PyMuPDF). Rebuilds → the first image was bad.
 Identical low-token fallback → genuinely un-chartable, carry it through flagged.
+
+**`isFallback` with a filter/incomplete reason** (e.g. `content_filter`) gets the same treatment:
+retry that one chart ONCE, cropped tight to just the chart — busy full-slide images trip filters
+that a clean chart crop sails through. Only the failed chart goes in the retry call; keep the
+successes from the first result and merge in Step 3 (mind the duplicate-id rule).
 
 ## Step 3 — Build the bundle
 

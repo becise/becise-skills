@@ -2,20 +2,32 @@
 
 Reference for `SKILL.md`. Read when something surprises you or before changing the scripts.
 
-## Why the gallery uses iframes
+## Why the gallery mounts charts same-page (NOT iframes)
 
 Concatenating several `artifact.html` fragments into one page breaks them: their top-level `const`s
-(`BECISE`, helpers) and `Chart.register` calls collide at page scope. Each chart therefore gets its
-own `<iframe srcdoc="…web.html…">`. The frames isolate scope, deps are already inlined, and it
-renders live under the Artifact CSP (validated 2026-07-24).
+(`BECISE`, helpers) and `Chart.register` calls collide at page scope. The gallery used to solve this
+with one `<iframe srcdoc="…web.html…">` per chart — validated under the Artifact CSP 2026-07-24,
+**observed rendering blank under the claude.ai/code Artifact CSP 2026-07-29**: `frame-src`-style
+policies don't admit `about:srcdoc`, so a host policy change silently blanks every chart while the
+page chrome renders fine. Don't reintroduce frames; they put the whole deliverable at the mercy of
+the host's frame policy.
 
-Two requirements that are easy to get wrong:
+`build-gallery.mjs` instead mounts each chart same-page and does the isolation itself:
 
-- **Fully entity-escape the srcdoc** (`&` `<` `>` `"`), or the framed document's inner `<title>` and
-  `<script>` leak to the Artifact title scanner.
-- Frames carry `sandbox="allow-scripts"` **without** `allow-same-origin` — correct for a Chart.js
-  page, which needs script execution but no storage or parent access. Verified to still render live
-  inside the sandboxed opaque-origin frame (2026-07-27).
+- **Vendor libs deduped** — the inlined Chart.js/adapter/datalabels `<script>`s are identical
+  across charts; each unique one is emitted ONCE, before any chart code (also halves gallery size).
+- **One IIFE per chart** — all of a chart's body scripts are concatenated and wrapped together
+  (they share top-level helpers, so per-block wrapping would break cross-references). No
+  `'use strict'`: emitted chart code has been observed to assign undeclared globals, which strict
+  mode turns into a thrown error and a blank chart.
+- **Per-chart id suffix** — every `id="…"` in the mounted markup and every literal
+  `getElementById('…')` in its code gets `--<chart_id>`, so chart N can't capture chart 1's canvas.
+- **CSS defused** — the fragment's `html, body` sizing rule is stripped (same as
+  `toArtifactFragment`) and its universal `* { margin:0; … }` reset is scoped to `.becise-embed`
+  so it can't flatten the gallery chrome. Fragment CSS is deduped across charts too.
+
+Residual global bleed (`Chart.defaults`, `Chart.register`) is shared by design: every fragment sets
+identical values, and Chart.js registration is idempotent.
 
 ## `manifest.json` — full shape
 
