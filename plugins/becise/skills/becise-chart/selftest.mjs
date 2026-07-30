@@ -154,6 +154,48 @@ check('payload-less HTML is flagged as emptyPayload', () => {
   assert(m.payloadWarnings.length === 1, `expected one payload warning, got ${m.payloadWarnings.length}`);
 });
 
+// 5. The server externalizes chart documents — `html` arrives as a presigned URL, not markup.
+//    (2026-07-30: the old bundler wrote the URL string itself to .raw.html, shipping a 485-byte
+//    "chart" that rendered as a bare link.) data: URLs exercise the fetch path with zero network.
+check('URL-mode html is fetched and bundled, not written as the chart', () => {
+  const doc = chartHtml({ title: 'Fetched chart' });
+  const r = run(FROM, {
+    outDir: dir('urlmode'),
+    result: { results: [{ chart_id: 'u1', html: `data:text/html;base64,${Buffer.from(doc).toString('base64')}` }] },
+  });
+  assert(r.bundled.join(',') === 'u1', `expected u1 bundled, got ${r.bundled.join(',')}`);
+  assert(!r.brokenWarning, `fetched chart should have a real payload, got: ${r.brokenWarning}`);
+  assert(r.manifest.charts[0].title === 'Fetched chart', `metadata should come from the FETCHED markup, got ${r.manifest.charts[0].title}`);
+  const raw = readFileSync(join(dir('urlmode'), 'u1.raw.html'), 'utf8');
+  assert(raw.startsWith('<!DOCTYPE html>'), 'raw.html must hold the fetched markup, not the URL string');
+});
+
+check('an unreachable html URL skips that chart with a reason, not the bundle', () => {
+  const r = run(FROM, {
+    outDir: dir('urlfail'),
+    critiques: [
+      { results: [{ chart_id: 'ok1', html: chartHtml({ title: 'Inline survivor' }) }] },
+      { results: [{ chart_id: 'gone1', html: 'https://127.0.0.1:1/expired.html' }] },
+    ],
+  });
+  assert(r.bundled.join(',') === 'ok1', `inline chart must survive, got ${r.bundled.join(',')}`);
+  const s = r.skipped.find(x => x.chart_id === 'gone1');
+  assert(s, 'unfetchable chart must be recorded in skipped');
+  assert(r.manifest.charts.some(c => c.chart_id === 'gone1' && c.isFallback), 'and recorded in the manifest as fallback');
+});
+
+// rebuild_chart returns ONE chart per call — a bare object, not results[].
+check('single-object rebuild_chart result shapes are accepted', () => {
+  const r = run(FROM, {
+    outDir: dir('single'),
+    critiques: [
+      { chart_id: 'solo1', html: chartHtml({ title: 'Bare object' }) },
+      { results: { chart_id: 'solo2', html: chartHtml({ title: 'Wrapped object' }) } },
+    ],
+  });
+  assert(r.bundled.sort().join(',') === 'solo1,solo2', `both single-object shapes must bundle, got ${r.bundled.join(',')}`);
+});
+
 // The manifest is a consumed contract (becise-place reads it) — hold its shape.
 check('manifest is versioned and every entry has the same keys', () => {
   const r = run(FROM, {

@@ -13,11 +13,13 @@ description: >
 # Becise Chart → shown chart + bundle
 
 Orchestration only. **No Becise IP lives here** — analysis happens server-side behind the
-`chart_critique` MCP tool.
+`rebuild_chart` MCP tool.
 
 ```
-INGEST ──► chart_critique ──► bundle-from-critique.mjs ──► SHOW ──► (hand off)
-pixels     one call/image     raw/web/artifact + manifest  Artifact  → becise-place
+INGEST ──► CROP ──► rebuild_chart ──► bundle-from-critique.mjs ──► SHOW ──► (hand off)
+pixels     one     one call/chart     raw/web/artifact + manifest  Artifact  → becise-place
+per view   chart   (parallel calls)
+           each
 ```
 
 **Self-sufficient through "here is your rebuilt chart."** `becise-place` is only for putting it
@@ -45,33 +47,48 @@ plotted data geometry. **Colored-cell tables count** (heatmaps).
 isotype/pictographs, logos, photos. A concept diagram drawn to look chart-like (a funnel of shapes)
 isn't chartable — note it rather than forcing it.
 
-Record per kept chart: its view, a plain-language `location` hint (`"bar chart, right half"`), and a
-**`chart_id` unique across the whole job**, view-prefixed: `slide3_chart1`, `page9_chart1`. Two calls
-that each start at `chart1` collide when merged, and Step 3 refuses duplicates.
+Record per kept chart: its view, where it sits (you'll crop it in Step 1), and a **`chart_id`
+unique across the whole job**, view-prefixed: `slide3_chart1`, `page9_chart1`. Two views that each
+start at `chart1` collide when merged, and Step 3 refuses duplicates.
 
 **Big sources:** triage cheap metadata first (Slides `get_presentation` text, a PDF's extracted
 text) to drop title/text/table pages, then eyeball only candidates; montage many views into one
 contact sheet rather than reading each. **If the user named the view** ("the chart on slide 5"),
 skip triage entirely and go straight to that one. **If nothing is chartable, stop** and say so.
 
-## Step 1 — Ingest: a fetchable image per view
+## Step 1 — Ingest and CROP: one tight image per chart
+
+`rebuild_chart` takes **the chart, not the page around it**. A tight crop is faster, more accurate,
+and far less likely to trip upstream image filters than a full slide (a busy full-slide image has
+been observed tripping a provider content filter that the same chart's clean crop sailed through).
+
+First get full-view pixels:
 
 | Source | Pixels |
 | --- | --- |
-| Google Slides | `get_page_thumbnail` (`LARGE`) — pass its URL straight through, it's server-fetchable |
+| Google Slides | `get_page_thumbnail` (`LARGE`) → `curl` it to disk, then crop |
 | PDF / doc | render the page to PNG (below) |
 | Local Office file (`.pptx`/`.key`/`.docx`) | convert to PDF first (below), then render the page |
-| Image / screenshot / dashboard | use as-is |
+| Image / screenshot / dashboard | use as-is, then crop |
 | Webpage | screenshot the region (claude-in-chrome) |
 
 **From Google Drive:** `get_drive_file_download_url` → `curl` it to disk (HTTP mode returns a temp
 URL, not a path; a huge file may return base64-in-JSON → `jq -r .content | base64 -d`).
 
-**Hosting.** Already at a public URL (including Slides thumbnails)? Pass it straight to
-`chart_critique`. Local or auth-gated (rendered PDF page, screenshot, private Drive file)? Host it:
-`get_upload_url` → `PUT` the bytes (`Content-Type: image/png`; plain `--data-binary`, ignore the
-`crc32` param) → use the returned `downloadUrl`. **Presigned URLs expire ~300s** — call
-`chart_critique` immediately, and mint a fresh one for any retry.
+**Then crop each chart out of its view:**
+
+- **PDF-rendered views:** PyMuPDF `clip` renders the crop directly at high scale —
+  `python3 -c "import fitz; d=fitz.open('in.pdf'); d[3].get_pixmap(matrix=fitz.Matrix(4,4), clip=fitz.Rect(x0,y0,x1,y1)).save('crop.png')"`
+  (clip coords are in the page's point space — view the full render first and scale your estimate).
+- **Raw images (thumbnails, screenshots):** PIL —
+  `python3 -c "from PIL import Image; Image.open('view.png').crop((x0,y0,x1,y1)).save('crop.png')"`
+  (`fitz` can also open plain images if PIL is missing).
+- Include the chart's **title, axis labels, legend, and data labels**, plus a small margin. Exclude
+  everything else — neighboring panels, page headers, decorative side content.
+
+**Verify every crop by LOOKING at it** before upload: every label/legend/axis readable, no data
+marks cut off, nothing foreign in frame. Clipped labels → widen and re-crop. This check is
+mandatory — a bad crop wastes a whole server round-trip.
 
 **Office file → PDF.** Also **check, never assume**: `which soffice ; ls -d /Applications/Keynote.app`
 
@@ -99,19 +116,36 @@ check found. **The two number pages differently — mind the off-by-one or you r
 - **PyMuPDF — 0-based** (printed page 9 = index 8):
   `python3 -c "import fitz; d=fitz.open('in.pdf'); d[8].get_pixmap(matrix=fitz.Matrix(3,3)).save('page.png')"`
 
-Only PyMuPDF can take a **tight crop** (a `clip` rect, or bounds from `page.get_text('dict')`) — the
-thing the low-token-fallback retry needs. If only poppler is present and you need a crop, install it:
-`pip install pymupdf` (add `--break-system-packages` only if pip refuses on a distro-managed Python).
-Neither available and no network → **say so plainly** rather than shipping a bad image.
+Only PyMuPDF renders a cropped region straight from the PDF; with poppler, render full and crop with
+PIL. Missing a tool you need: `pip install pymupdf` / `pip install pillow` (add
+`--break-system-packages` only if pip refuses on a distro-managed Python). Neither available and no
+network → **say so plainly** rather than shipping a bad image.
 
-Render at 2–3×. The result is local → host it before calling.
+Render at 2–3× (crops at 3–4×). **Hosting each crop:** `get_upload_url` → `PUT` the bytes
+(`Content-Type: image/png`; plain `--data-binary`, ignore the `crc32` param) → use the returned
+`downloadUrl`. **Presigned URLs expire ~300s** — call `rebuild_chart` immediately, and mint a fresh
+one for any retry. (The server fetches the URL once at job start, so it only needs to survive
+seconds, but don't cut it fine.)
 
 ## Step 2 — Analyze
 
-One `chart_critique` call **per source image**: that image's `url` plus every chart on it in one
-`charts[]` of `{ chart_id, location }`, plus `storyContext` when you know the narrative. Repeat
-across views, keep each result. Poll `get_result` on `{state:"pending"}` (charts take 60–90s; tell
-the user it's running). Don't hand-save the HTML — Step 3 does it.
+One `rebuild_chart` call **per chart** — issue the calls back-to-back so multi-chart jobs run in
+parallel (each returns its own `jobId`):
+
+- `chartImage`: `{ url: <crop downloadUrl>, mimeType: "image/png" }`
+- `chart_id`: the job-wide-unique id from Step 0
+- `context.story`: the narrative claim the chart must support, when you know it
+- `context.text`: what surrounds the chart — the slide/page/panel's other content, in your words.
+  You've SEEN the full view; describe it. Don't upload it.
+
+Poll `get_result` per jobId on `{state:"pending"}` (typically 1–3 min per chart; occasionally
+longer under provider degradation — keep polling; tell the user it's running). Don't hand-save the
+HTML — Step 3 does it. Successful results carry `html` as a **presigned URL** (~3h), not inline
+markup; Step 3's bundler fetches it.
+
+**If `rebuild_chart` is not in the tool listing** (older server), fall back to the legacy
+`chart_critique` contract: one call per source image with the FULL view's url and all its charts in
+`charts[]` of `{ chart_id, location }` + `storyContext`. Everything downstream is unchanged.
 
 **`get_result` dying with a transport error** ("MCP server connection lost" or similar) while the
 job runs is EXPECTED on long jobs — the proxy times out the long-poll before the server answers.
@@ -119,35 +153,40 @@ It is not a failure and not worth reporting: call `get_result` again with the sa
 times as it takes, until you get `done` or `error`.
 
 **Fallbacks with low `usage.inputTokens`** (a few k, vs ~30k+ for a real run) mean the image was
-barely processed, not that the chart is un-chartable. Retry that one chart ONCE with a tighter crop
-(`fitz` `clip` — the case that justifies installing PyMuPDF). Rebuilds → the first image was bad.
+barely processed, not that the chart is un-chartable. Look at the uploaded crop again — wrong file,
+blank render, stale export? Fix and retry that one chart ONCE. Rebuilds → the first image was bad.
 Identical low-token fallback → genuinely un-chartable, carry it through flagged.
 
-**`isFallback` with a filter/incomplete reason** (e.g. `content_filter`) gets the same treatment:
-retry that one chart ONCE, cropped tight to just the chart — busy full-slide images trip filters
-that a clean chart crop sails through. Only the failed chart goes in the retry call; keep the
-successes from the first result and merge in Step 3 (mind the duplicate-id rule).
+**`isFallback` with a filter/incomplete reason** (e.g. `content_filter`) should be rare now that
+crops are the default input. If one still fires, tighten the crop further (chart marks + axis labels
+only) and retry that one chart ONCE.
 
 ## Step 3 — Build the bundle
 
-Pipe the tool result straight in. Prefer STDIN; multi-chart results exceed argv limits.
+Pipe the tool result(s) straight in. Prefer STDIN; multi-chart results exceed argv limits.
+`result`/`critiques` entries accept both shapes: `rebuild_chart`'s single chart object and
+`chart_critique`'s `results[]`. URL-mode `html` is fetched by the bundler — **bundle promptly**
+(presigned URLs last ~3h; an expired one skips that chart with a clear reason — re-run the tool for
+a fresh URL).
 
 ```
-# one image:
-echo '{"outDir":"<dir>","result":<chart_critique result>}'                 | node <SKILL_DIR>/bundle-from-critique.mjs
-# several images → ONE merged bundle:
+# one chart:
+echo '{"outDir":"<dir>","result":<rebuild_chart result>}'                  | node <SKILL_DIR>/bundle-from-critique.mjs
+# several charts → ONE merged bundle:
 echo '{"outDir":"<dir>","critiques":[<result A>,<result B>,…]}'            | node <SKILL_DIR>/bundle-from-critique.mjs
 ```
 
-Writes per chart: `<id>.raw.html` (as returned), `<id>.web.html` (self-contained, opens offline),
-`<id>.artifact.html` (body fragment for the Artifact tool), plus a shared `manifest.json`.
-`files.png` is `null` — PNGs are `becise-place`'s job. All paths are relative to the bundle dir.
+Writes per chart: `<id>.raw.html` (the fetched/returned markup), `<id>.web.html` (self-contained,
+opens offline), `<id>.artifact.html` (body fragment for the Artifact tool), plus a shared
+`manifest.json`. `files.png` is `null` — PNGs are `becise-place`'s job. All paths are relative to
+the bundle dir.
 
 **Check the returned flags before publishing anything:**
 
 | Flag | Means | Do |
 | --- | --- | --- |
-| `warning` | low-token fallback | retry once, tighter crop (Step 2) |
+| `warning` | low-token fallback | re-check the crop, retry once (Step 2) |
+| `skipped[].reason` mentions URL fetch | presigned `html` URL expired/unreachable | re-run the tool for that chart, re-bundle |
 | `brokenWarning` / `payloadWarnings` | bundled HTML has no chart payload, renders EMPTY | don't publish it; re-check the raw file |
 | `nothingRebuilt` | every chart came back `isFallback` | publish nothing; report the failures |
 | `warnings[]` | external ref survived inlining, unknown dep, or `VENDOR VERSION MISMATCH` | see NOTES.md |
@@ -193,8 +232,8 @@ never absent). Full shape in NOTES.md.
 ## Rules
 
 - Colors come back pre-themed. **Accept them as-is** — never re-theme here.
-- No hand-authored chart code, ever. No slide screenshots as a substitute for ingest.
+- No hand-authored chart code, ever. No full-view screenshots as a substitute for a real crop.
 - Translate script errors into plain language for the user; don't paste raw stack output.
 - **After editing any `.mjs` here, run `node <SKILL_DIR>/selftest.mjs`** (no network, Chrome, or
   MCP). It covers the silent-failure modes: id collision, quote-blind inlining, all-fallback,
-  payload-less HTML, manifest shape.
+  payload-less HTML, URL-mode html, single-object results, manifest shape.

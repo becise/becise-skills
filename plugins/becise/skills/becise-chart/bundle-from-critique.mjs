@@ -14,12 +14,18 @@
  *
  * USAGE:  echo '<json>' | node bundle-from-critique.mjs [outDir]
  *         node bundle-from-critique.mjs '<json>'
- * INPUT:  { "outDir": "...", "result": <one chart_critique result> }
+ * INPUT:  { "outDir": "...", "result": <one chart_critique / rebuild_chart result> }
  *     OR: { "outDir": "...", "critiques": [ <result>, <result>, ... ] }   // MERGE many into one bundle
  *   Charts on different source images (different slides / PDF pages / screenshots) come back as
- *   SEPARATE chart_critique calls → separate results. Pass them all under `critiques` to land them
- *   in ONE bundle + ONE manifest. `result`/each critique is shape-tolerant:
- *   {result:{results:[...]}}, {results:[...]}, or [...]. each item: {chart_id, html?, isFallback?, reason?, usage?}.
+ *   SEPARATE calls → separate results. Pass them all under `critiques` to land them in ONE bundle +
+ *   ONE manifest. `result`/each critique is shape-tolerant:
+ *   {result:{results:[...]}}, {results:[...]}, [...], or a SINGLE chart object (rebuild_chart returns
+ *   one chart per call): {chart_id, ...} / {results:{chart_id, ...}}.
+ *   each item: {chart_id, html?, isFallback?, reason?, usage?}.
+ *   `html` may be INLINE MARKUP or a URL (the server externalizes big documents to a presigned URL,
+ *   ~3h TTL) — URL-mode html is fetched here and the fetched markup is bundled. A failed fetch skips
+ *   that chart with a clear reason instead of sinking the bundle; presigned URLs expire, so bundle
+ *   promptly and re-run the tool for a fresh URL if one has lapsed.
  * OUTPUT (stdout): { "bundled":[ids], "skipped":[{chart_id,reason,inputTokens,suspectWrongImage}],
  *                    "manifest":{...incl. fallback entries + payloadWarnings...},
  *                    "warning"?: "<low-token fallback: retry-to-disambiguate note>",
@@ -37,7 +43,24 @@ function extractResults(result) {
   if (Array.isArray(result)) return result;
   if (Array.isArray(result?.results)) return result.results;
   if (Array.isArray(result?.result?.results)) return result.result.results;
-  throw new Error('could not find results[] in a critique result');
+  // rebuild_chart returns ONE chart per call — a bare chart object, possibly wrapped.
+  for (const candidate of [result, result?.results, result?.result]) {
+    if (candidate && typeof candidate === 'object' && typeof candidate.chart_id === 'string') return [candidate];
+  }
+  throw new Error('could not find results[] (or a single {chart_id, ...} chart) in a critique result');
+}
+
+// The server externalizes big chart documents: `html` arrives as a presigned URL, not markup.
+// (data: URLs are honored too so the selftest can exercise this path with zero network.)
+const URL_HTML = /^(https?:|data:)/i;
+
+async function resolveHtml(it) {
+  if (!URL_HTML.test(it.html.trim())) return it.html;
+  const res = await fetch(it.html.trim(), { signal: AbortSignal.timeout(30_000), redirect: 'follow' });
+  if (!res.ok) throw new Error(`html URL fetch failed: HTTP ${res.status} (presigned URLs expire ~3h — re-run the tool for a fresh one)`);
+  const body = await res.text();
+  if (!body.trim()) throw new Error('html URL fetch returned an empty body');
+  return body;
 }
 
 // One result (input.result) OR many (input.critiques: [result, ...]) → a flat list of chart items.
@@ -71,7 +94,7 @@ const SUSPECT_FALLBACK_INPUT_TOKENS = 15000;
 // (looksLikeRealChart → manifest.payloadWarnings) lives in make-bundle.mjs so BOTH the fast path and
 // a direct make-bundle call catch it; here we just surface manifest.payloadWarnings as brokenWarning.
 
-function main(input, outDirArg) {
+async function main(input, outDirArg) {
   const outDir = input.outDir || outDirArg;
   if (!outDir) throw new Error('outDir is required (in JSON or as argv)');
   const items = collectItems(input);
@@ -90,8 +113,16 @@ function main(input, outDirArg) {
       if (suspectWrongImage) suspect.push(id);
       continue;
     }
+    let html;
+    try {
+      html = await resolveHtml(it);
+    } catch (e) {
+      // One expired/broken URL must not sink the other charts in the bundle.
+      skipped.push({ chart_id: id, reason: e.message, inputTokens: it.usage?.inputTokens ?? null, suspectWrongImage: false });
+      continue;
+    }
     const rawPath = join(outDir, `${id}.raw.html`);
-    writeFileSync(rawPath, it.html);
+    writeFileSync(rawPath, html);
     charts.push({ chart_id: id, rawHtmlPath: rawPath });
   }
   // ALL results were fallbacks. Still emit a real bundle: a manifest that RECORDS every attempt is

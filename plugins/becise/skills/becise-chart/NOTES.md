@@ -59,19 +59,44 @@ rebuilds → bad image; identical low-token fallback → genuinely un-chartable.
 Note this is Becise's *server-side* token count, reported back for exactly this purpose. It never
 enters client context.
 
-## The HTML passes through you once
+## `rebuild_chart` vs the legacy `chart_critique` contract
 
-The chart HTML exists only inside the `chart_critique` tool result — there is no harness auto-save of
-MCP results to disk (verified). `bundle-from-critique` removes the per-file write dance and the
-reformatting, but not that single unavoidable emission.
+`rebuild_chart` (server, 2026-07-30) is the contract this skill now targets: **one tight chart
+image per call**, optional `context.{text,story}`, no `location` hint. It exists because the
+full-slide + location-hint path had three field failures the crop path doesn't:
 
-That hand-off is where HTML can get truncated or mis-transcribed, producing a page that bundles fine
-and renders empty. `looksLikeRealChart` in `make-bundle.mjs` guards it (surfaced as `emptyPayload` /
-`brokenWarning`). The guard lives in `make-bundle` rather than the wrapper so both entry paths get it.
+1. **Content filters.** A busy full-slide image (icons, big `$` glyphs, side panels) tripped an
+   upstream provider filter; the same chart's clean crop passed untouched. The server can't fall
+   back across providers on a filter trip, so the whole chart died.
+2. **Accuracy/cost.** The extraction model reads everything you send it. The `location` hint was a
+   prompt-level "please ignore the rest" — a pixel crop actually removes the rest.
+3. **URL lifetime.** `chart_critique` hands your presigned image URL to the provider, which fetches
+   it late; `rebuild_chart` fetches it server-side at job start, so ~300s TTLs stop racing the job
+   queue.
 
-**This whole class of bug disappears** if `chart_critique` ever returns a fetchable URL for the HTML
-alongside the inline copy: the client would curl it to disk and never hold it. That's a server-side
-change, currently parked.
+This is also platform parity: Becise's own deck-generation pipeline feeds the same rebuild engine
+lambda-cropped single-chart images with no location hint. The crop contract is the configuration
+that was already proven fast and accurate in production.
+
+Context is **text, not pixels**, by design: you have seen the full view; a sentence of surrounding
+copy tells the decider what it needs at a fraction of the cost, and `context.image` is reserved in
+the schema for a future server version. The legacy `chart_critique` fallback in Step 2 exists for
+version skew only — drop it once every deployed server has `rebuild_chart`.
+
+## The HTML no longer passes through you (URL mode)
+
+The server externalizes rebuilt chart documents: `html` in the result is a **presigned URL**
+(~3h TTL), not inline markup. `bundle-from-critique` fetches it straight to disk, so the fragile
+"multi-KB HTML rides through the calling context" hand-off is gone. (2026-07-30: before the bundler
+understood URLs, it wrote the URL string itself to `.raw.html` — a 485-byte "chart" that rendered as
+a bare link. The `emptyPayload` guard caught it; the bundler now fetches.)
+
+Two edges remain:
+- **Expired URL** → that chart lands in `skipped` with a fetch reason; re-run the tool for a fresh
+  URL. Bundle promptly after results arrive.
+- **Inline HTML** (older servers, other tools) still works — the bundler treats `html` as markup
+  unless it starts with `https?:`/`data:`. The truncation guard (`looksLikeRealChart` →
+  `emptyPayload`/`brokenWarning`) stays, and still protects the inline path.
 
 ## `manifest.json` — full shape
 
