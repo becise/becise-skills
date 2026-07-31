@@ -33,18 +33,30 @@ chart after a tighter-crop retry, where the later result should win. It keeps th
 it in `manifest.warnings`. Auto-namespacing by call index was rejected: it silently changes ids the
 caller chose, and `c0_chart1` carries less meaning than `slide3_chart1`.
 
-## Don't extract the chart image straight out of a `.pptx`
+## Media extraction from a `.pptx`: only when the slide IS the picture
 
-A `.pptx` is a zip, and the chart on a slide is often just a PNG sitting in `ppt/media/`. Unzipping
-and grabbing it looks like a free shortcut past the whole render step. It isn't.
+A `.pptx` is a zip, and the chart on a slide is often just an image sitting in `ppt/media/`.
+Whether grabbing it directly is safe is **decidable from `slide<N>.xml`**, and SKILL.md's
+flat-image check encodes exactly that:
 
-Deck authors routinely lay **native text shapes over the picture** — total labels above the columns,
-callouts, growth-rate rows. Those live in `slide<N>.xml`, not in the media file. Ship the raw media
-and Becise rebuilds a chart with its totals silently missing, with nothing anywhere reporting a
-problem. Observed in the wild: an Olipop deck where all five column totals were separate text boxes.
+- **The hazard** (why a blanket grab is wrong): deck authors routinely lay **native text shapes
+  over the picture** — total labels above columns, callouts, growth-rate rows. Those live in
+  `slide<N>.xml`, not the media file. Ship the raw media and Becise rebuilds a chart with its
+  totals silently missing. Observed in the wild: an Olipop deck where all five column totals were
+  separate text boxes (five `<p:sp>` with `<a:t>` — fails the check).
+- **The affirmative case** (why a blanket ban is also wrong): export-style decks (beautiful.ai
+  etc.) pre-render slides as single full-bleed JPEGs with NOTHING else on the slide. On
+  2026-07-30/31 the converters burned 3–7 minutes failing on such a deck while the media file —
+  higher-resolution than any re-render — sat in the zip; extraction rescued all three runs
+  (one `<p:pic>`, zero text runs, zero shapes — passes the check).
+- **Binary by design**: any text run or drawable shape fails the check and forces a composed-slide
+  render. No overlap geometry, no "the text looks unrelated" judgment — false negatives cost
+  minutes, false positives cost correctness. Residual accepted risk: master/layout-level shapes
+  don't appear in `slide<N>.xml`; masters carry footers and logos, not data annotations.
+- The rels mapping matters: media numbering ≠ slide numbering (slide4 → image3.jpg in the field).
 
-Render the composed slide. The zip is still worth opening to *understand* a slide (shape inventory,
-`<a:t>` text) — just never as the pixel source.
+The zip is also still worth opening just to *understand* a composed slide (shape inventory,
+`<a:t>` text) even when the pixel source must be a render.
 
 ## The low-token fallback heuristic
 

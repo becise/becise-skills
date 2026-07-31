@@ -90,16 +90,43 @@ URL, not a path; a huge file may return base64-in-JSON → `jq -r .content | bas
 marks cut off, nothing foreign in frame. Clipped labels → widen and re-crop. This check is
 mandatory — a bad crop wastes a whole server round-trip.
 
-**Office file → PDF.** Also **check, never assume**: `which soffice ; ls -d /Applications/Keynote.app`
+**Local `.pptx` — flat-image check FIRST (seconds, no conversion).** A `.pptx` is a zip:
+`unzip -o -d <dir> deck.pptx 'ppt/slides/*' 'ppt/media/*'`. Open `ppt/slides/slide<N>.xml`. If it
+has **exactly one `<p:pic>`, zero `<a:t>` text runs, and no other drawable shape** (`<p:sp>`,
+`<p:grpSp>`, `<p:graphicFrame>`, `<p:cxnSp>`), the slide IS that image: map its `r:embed` id
+through `_rels/slide<N>.xml.rels` to the `ppt/media/` file (never map by filename — slide4 →
+image3.jpg happens) and crop that directly. Original resolution, better pixels than any re-render.
+**Any text run or extra shape means the check FAILS — render the composed slide** (text may be
+layered over the picture; see NOTES.md) **and never use the raw media. No geometry judgment: text
+present = fail.** Export decks (beautiful.ai etc.) are flat on nearly every slide; native decks
+fail the check and take the ladder below.
+
+**Getting pixels from a local file never requires the network.** Do not import it into Google
+Slides/Drive, hand it to `scrape_deck`, or route it through any external service to render it —
+that uploads the user's file without being asked. If every path below fails, say so plainly.
+
+**Office file → PDF** (composed slides only). **Check, never assume**:
+`which soffice ; ls -d /Applications/Keynote.app`
 
 - **`soffice --headless --convert-to pdf --outdir <dir> in.pptx`** wherever LibreOffice exists.
-- **macOS:** drive **Keynote** by AppleScript — it opens `.pptx` and exports PDF reliably, and it
-  ships on every Mac. `open POSIX file "…"` → `export … as PDF` → `close saving no`.
-- **Export to a user-visible dir (`~/Downloads`), never the scratchpad** — Keynote and PowerPoint are
-  OS-sandboxed and cannot write there. They report success and write nothing.
-
-Reach for a PowerPoint MCP or PowerPoint itself only after both fail; its AppleScript export is
-unreliable and its save verbs differ by version.
+- **macOS: Keynote by AppleScript — TWO attempts maximum, then move down the ladder.** Automation
+  fails in the field when scripted naively: sandboxed `osascript` can't launch apps (error
+  `-10810` — run unsandboxed), and sending `open` to a cold Keynote races its scripting
+  registration (error `-1708` / bogus `unmerge id` document refs — retrying variants of the naive
+  recipe does NOT recover it). Use the hardened shape, which survives cold starts and stale open
+  documents: `launch` → poll `count documents` inside `try` until scripting answers → `close every
+  document saving no` → `open (POSIX file …)` → poll `count of documents > 0` (the return value of
+  `open` is unreliable mid-import — never use it) → `export front document to (POSIX file …) as
+  PDF` (fresh filename; Keynote errors on overwrite) → `close every document saving no`.
+- **Export to a user-visible dir (`~/Downloads`), never the scratchpad** — Keynote is OS-sandboxed
+  away from the scratchpad; it reports success and writes nothing.
+- **PowerPoint is the last resort — ONE attempt, and never via a PowerPoint MCP's export tool**
+  (observed 0-for-3: reports "exported" and writes NOTHING anywhere). If Microsoft PowerPoint is
+  installed, drive it directly by AppleScript with BOTH paths as `POSIX file` objects and the
+  destination INSIDE its own container (`~/Library/Containers/com.microsoft.Powerpoint/Data/tmp/`),
+  then `cp` the PDF out — any destination outside the container hangs on a modal dialog that
+  wedges the app. Verify by **mtime**, not existence; no file = the rung failed, move on — do not
+  hunt containers for a phantom PDF.
 
 **Verify every render.** `stat` the output before using it. Export tools — MCP wrappers especially —
 routinely return "success" while producing no file. Don't confirm by `find`-ing the filename: a stale
@@ -146,8 +173,12 @@ markup; Step 3's bundler fetches it.
 
 **GLOBAL retry cap: at most ONE re-run per chart in total, whatever the trigger** — low-token
 fallback, content_filter, syntax warning, or empty payload. The per-trigger notes below never
-stack: a chart that fails after its one re-run is reported with its reason, not retried again and
-never hand-patched.
+stack. **When the cap is reached, the deliverable IS the failure report**: which chart failed, the
+reason, and the offer to retry later. Including extracted VALUES in that report (a small table of
+what Becise's analysis found) is useful and fine — it's the user's own data. **But never render a
+chart yourself** — not from the image, not from extracted data mined out of a broken result, not
+"as a fallback." Becise's rendering carries its design judgment; a hand-built chart wearing
+Becise's data delivers the analysis stripped of the product. Report, offer the retry, stop.
 
 **If `rebuild_chart` is not in the tool listing** (older server), fall back to the legacy
 `chart_critique` contract: one call per source image with the FULL view's url and all its charts in
@@ -244,7 +275,8 @@ never absent). Full shape in NOTES.md.
 ## Rules
 
 - Colors come back pre-themed. **Accept them as-is** — never re-theme here.
-- No hand-authored chart code, ever. No full-view screenshots as a substitute for a real crop.
+- **No hand-authored chart code, ever — including when Becise fails.** A failed rebuild is reported,
+  not replaced with your own chart. No full-view screenshots as a substitute for a real crop.
 - Translate script errors into plain language for the user; don't paste raw stack output.
 - **After editing any `.mjs` here, run `node <SKILL_DIR>/selftest.mjs`** (no network, Chrome, or
   MCP). It covers the silent-failure modes: id collision, quote-blind inlining, all-fallback,
