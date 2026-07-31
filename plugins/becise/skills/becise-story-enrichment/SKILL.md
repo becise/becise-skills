@@ -1,92 +1,140 @@
 ---
-name: "becise-story-enrichment"
-description: "Use whenever calling the Becise MCP's improve_slide_pptx tool and the result comes back with stage: \"assessment\" -- meaning the server has diagnosed the slide (job, claim, so-what, and planned work) but is unconditionally waiting for a human to confirm the reading and authorize the build before it renders anything. This applies on EVERY assessment, including fully confident ones -- confirmation is never skipped. Governs how to resolve context_gaps from available resources first, then ask the user at most one well-framed question (with candidate claims) covering both the takeaway and the go-ahead, before re-calling improve_slide_pptx with storyConfirmed: true."
+name: becise-story-enrichment
+description: >
+  Enrich the story behind a slide before critique/build, then always get human
+  consent on the raw critique. Activate when slide_analyze returns (especially
+  with context_gaps / uncertain so_what), when slide_revision_v2_critique is
+  about to run or has just returned, when the user asks to improve or rebuild
+  a slide, or when you would have used the deprecated improve_slide_pptx
+  assessment/confirm flow. Search Drive, email, notes, briefs, and prior chat
+  for why the slide exists and what takeaway the audience should leave with;
+  never skip the human ask; never call slide_revision_v2_build without consent.
 ---
 
-## Becise Story Enrichment
+# Story enrichment (slide-revision-v2)
 
-Instructions for handling `improve_slide_pptx` (Becise MCP) assessment results -- the server's diagnosis of a slide, returned before it builds anything.
+You help Becise understand **why this slide exists** and **what takeaway the audience should leave with**, then make sure a human has seen the critique before any rebuild.
 
-### When this applies
+You do **not** build slides yourself. After enrichment and consent, call `slide_revision_v2_build`. Exhibits, recommendations, tree, and Arranger run on the server.
 
-`improve_slide_pptx` is called twice per slide. The FIRST call (no `storyConfirmed`) always returns `stage: "assessment"` -- a fast diagnosis with no outline or PPTX. The SECOND call, with `storyConfirmed: true`, does the actual build.
+## Do not
 
-This skill applies to every `stage: "assessment"` result, regardless of how confident the diagnosis is. There is no signal to check for "is this one of the uncertain ones" -- the pause is unconditional, because the assessment can be wrong even when it reads confident. If the result instead carries `stage: "build"` (i.e. you already sent `storyConfirmed: true`), this skill has already done its job for that call.
+- Call `improve_slide_pptx` (deprecated — no `storyConfirmed` / assessment envelopes).
+- Call `slide_revision_v2_build` before the human has seen the raw critique and agreed.
+- Use Google Workspace apply / Sheets flows for this path.
+- Tell the user their slide is confusing or poorly made.
+- Invent chart or table numbers.
 
-### Read the assessment first
+## When you activate
 
-From the result, note:
+Typical path:
 
-- `story_assessment.reading` -- the server's best guess at the slide's takeaway (or the slide's job, for non-argument slides)
-- `story_assessment.so_what` and `so_what_confidence` (`confident` / `partial` / `guessing`) -- whether the CONSEQUENCE of that takeaway is grounded, independent of how clear the claim itself is
-- `story_assessment.enrichment` (`not_needed` / `recommended` / `important`) -- how hard to search before confirming; it never blocks anything, it's just a hint
-- `story_assessment.context_gaps` -- specific questions that would resolve an ungrounded so-what
-- `changes_expected` -- whether the server plans to change anything at all
-- `human_summary` -- ready-to-present markdown covering all of the above plus the critique and planned work
+1. `slide_analyze` has run (or is about to), **or**
+2. You’re preparing `slide_revision_v2_critique`, **or**
+3. Critique just returned and you must present it / ask to build.
 
-### No build when nothing is planned
+## Your job (in order)
 
-If `changes_expected` is `false`, the slide already serves its job. Present the critique (via `human_summary` or your own words) and STOP -- do not re-call with `storyConfirmed`. There is nothing to confirm.
+### 1. Read the analyze signal
 
-### Search first -- do not bother the user if you can resolve it
+From `slide_analyze` (when available), note:
 
-When `enrichment` is `recommended` or `important`, try to resolve each `context_gaps` entry before involving the user:
+- `slide_job`, `core_claim`
+- `context_gaps` — concrete questions to search
+- `so_what` / `so_what_confidence` / claim confidence
 
-1. Check connected resources: Drive files, emails, meeting notes, briefs, prior conversation, and any `deckContext` already supplied.
-2. Look specifically for what the gap asks -- a target figure, an audience identity, a deck-level argument this slide supports.
-3. Whatever you find, pass it along as `narrativeContext` on the re-call (source noted, if helpful) -- but still present the reading for confirmation. Search resolves the SERVER's uncertainty; it does not replace the human's go-ahead.
+Treat gaps as a **search plan**, not as a reason to skip work. Enrichment is always worth attempting; it never replaces the later human ask.
 
-Do not skip the confirmation step just because search resolved every gap.
+### 2. Always search connected resources
 
-### One question, covering both asks
+Before critique (or before asking the human, if critique already ran without enrichment), search:
 
-Present the assessment to the user and ask **at most one** question that covers both:
+- Drive / docs / decks
+- Email
+- Meeting notes
+- Briefs / PRDs
+- Prior conversation in this thread
+- Any `deckContext` already supplied
 
-- Is the reading right? (the takeaway, or for non-argument slides, the job)
-- Should I go ahead and build it?
+Focus on:
 
-Use `human_summary` as the default framing -- it already has the job, the reading, the so-what (or lack of one), the critique, and the planned work. You may lightly rephrase for warmth, but keep the same intent and don't drop information.
+- Why this slide is in the presentation
+- What decision, risk, or action the audience should take away
+- Targets, benchmarks, audience, or prior claims that ground the so-what
 
-- Always present `story_assessment.candidate_claims` as concrete choices when non-empty.
-- Always include an open-ended "something else" option so the user can author their own claim.
-- If `context_gaps` remain unresolved after search, fold them into the question naturally (e.g. "...and one thing I couldn't tell from the slide: is 18% above or below target?") rather than asking a second, separate question.
-- The question is about what the slide is trying to convey (and, secondarily, whether to build) -- not about layout, fonts, or chart types.
+Synthesize into:
 
-**Never send `storyConfirmed: true` without having shown the assessment (or its substance) to the user first.** A re-call is not automatic just because search resolved the gaps -- the human still authorizes the build.
+- **`narrativeContext`** — short paragraph of what you found (grounded; no invented facts)
+- **`confirmedClaim`** — one declarative insight sentence when the slide argues; **omit** for non-argument slides (title, divider, agenda, credit, mood) where there is no claim
 
-#### Tone
+If search finds nothing useful, proceed anyway with whatever you have. Still always ask the human after critique.
 
-- Collaborative, not interrogative. The user is the expert on their narrative; you are helping them articulate and approve it.
-- State the reading confidently -- "Here's what I think this slide is driving at: ..." -- even when `so_what_confidence` is `guessing`. Be candid about the specific thing you don't know (the consequence), not vague about the whole slide.
-- Never say the slide is confusing, unclear, poorly made, or that you "can't figure it out."
-- Keep it brief: one short framing sentence, the reading, then (if needed) options and the one open gap, then the go-ahead ask.
+### 3. Call critique with enrichment
 
-Example shape (uncertain so-what):
+```
+slide_revision_v2_critique({
+  slideNumber,
+  slideImage,           // prefer get_upload_url; reuse the same url later
+  slideText?,
+  deckContext?,
+  narrativeContext?,
+  confirmedClaim?
+})
+```
 
-"Here's what I think this slide is driving at: three call-outcome metrics improved in June. One thing I can't tell from the slide -- is that ahead of target? Assuming it is, should I go ahead and sharpen the headline to make that point?"
+Poll `get_result` if pending.
 
-Example shape (unclear claim, candidates available):
+Keep `charts[]` / `tables[]` for the build echo. Do **not** dump inventories into chat unless asked.
 
-"I want to make sure I nail the story for this slide. Based on the data I can see, it could be arguing:
-1. ...
-2. ...
-3. ...
-Or something else -- what takeaway should the audience leave with, and should I go ahead and build it?"
+### 4. Always present the critique and ask once
 
-### Non-argument slides: confirm the job, not a claim
+**Every time**, after critique:
 
-When `story_assessment.claim_confidence` is `not_applicable` (title, divider, agenda, thank-you, credit, mood slides), there is no takeaway to confirm -- confirm the slide's JOB instead, and omit `confirmedClaim` on the re-call.
+1. Show the raw `critique` string (light framing is fine: “Here’s my read:” — don’t rewrite the diagnosis).
+2. Ask **one** question: ready to rebuild? Invite optional reactions.
 
-Example: "This looks like the section opener for Market Outlook -- want me to go ahead and clean up the layout?"
+Tone: collaborative, brief, concrete. Offer a reading; don’t interrogate.
 
-### After the user answers
+Examples:
 
-Re-call `improve_slide_pptx` with the same slide image / text / deck context plus `storyConfirmed: true`, and:
+- “Here’s my critique. Ready for me to rebuild the slide? Anything you’d change about the direction first?”
 
-- **Plain agreement** ("looks right", "yes go ahead"): pass `confirmedClaim` set to `story_assessment.reading` VERBATIM -- do not paraphrase it. Echoing the server's own reading back pins the rebuild to exactly what was approved.
-- **Correction**: pass `confirmedClaim` set to the user's takeaway, rewritten as one declarative insight sentence.
-- **Non-argument slide**: omit `confirmedClaim` entirely; the job confirmation needs no claim payload.
-- Pass `narrativeContext` for anything useful you found in search or the user gave you.
-- Pass `critiqueFeedback` for any freeform reaction to the diagnosis itself (a story correction, a scope instruction like "don't restructure the body, just fix the chart") -- it reaches both the re-analysis and, on the build, the prescription stage.
+Collect optional **`critiqueFeedback`**. If they correct the takeaway, set `confirmedClaim` to their declarative sentence before build.
 
-Then continue with the returned critique, outline, and PPTX as usual. If the build call returns `{ state: "pending", jobId }` (expect 2-4 minutes), poll `get_result`.
+**Do not** call build if they decline or haven’t answered.
+
+### 5. On consent → build
+
+```
+slide_revision_v2_build({
+  slideNumber,
+  slideImage,              // same url
+  slideText?,
+  critique: <echo critique result>,  // slide_job, core_claim, critique, charts, tables
+  narrativeContext?,
+  confirmedClaim?,
+  critiqueFeedback?
+})
+```
+
+Poll `get_result` (often 2–4 minutes with charts).
+
+### 6. Handle build outcomes
+
+| `outcome` | What you do |
+|-----------|-------------|
+| `headline_only` | Print `headline` in chat. Success. Stop. No PPTX. |
+| `ready` | Share PPTX `downloadUrl`; mention any `follow_up` notes. |
+| `blocked` | Explain `block_reason` / `error_stage`; don’t invent a Workspace workaround. |
+
+## Quick reference
+
+| Concern | Owner |
+|---------|--------|
+| Drive / email / notes search | **This skill** |
+| Human sees raw critique + consent | **This skill** |
+| Exhibits, recommend, tree, Arranger | Server (`slide_revision_v2_build`) |
+
+**Deprecated:** `improve_slide_pptx`, `storyConfirmed`, `stage: assessment`, `confirm.*`, `planned_work` as required UI.
+
+**Not this skill:** Workspace `slide_critique` apply/Sheets handover.
