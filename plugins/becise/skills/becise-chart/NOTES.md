@@ -91,12 +91,28 @@ The server externalizes rebuilt chart documents: `html` in the result is a **pre
 understood URLs, it wrote the URL string itself to `.raw.html` — a 485-byte "chart" that rendered as
 a bare link. The `emptyPayload` guard caught it; the bundler now fetches.)
 
-Two edges remain:
+Three edges remain:
 - **Expired URL** → that chart lands in `skipped` with a fetch reason; re-run the tool for a fresh
   URL. Bundle promptly after results arrive.
 - **Inline HTML** (older servers, other tools) still works — the bundler treats `html` as markup
   unless it starts with `https?:`/`data:`. The truncation guard (`looksLikeRealChart` →
   `emptyPayload`/`brokenWarning`) stays, and still protects the inline path.
+- **Server-corrupt fetched HTML** (2026-07-31): the model transcribing Becise's helper library
+  doubled its backslashes → one regex terminated early → SyntaxError → the fetched page bundles
+  fine and renders BLANK. `scriptSyntaxErrors` in make-bundle compiles (never executes) every
+  inline classic-JS script and folds failures into `emptyPayload` with a payloadWarning naming the
+  script and error. The server has its own gate + retry for this; the skill check covers old
+  servers, other entry paths into make-bundle, and any future regression.
+
+Sandbox note: in the Claude harness, Node's `fetch` ignores the `HTTP(S)_PROXY` env the sandbox
+provides (curl honors it) — the bundler falls back to `curl` on any fetch throw, and its terminal
+error names `NODE_USE_ENV_PROXY=1` (Node ≥ 24) when a proxy env is present.
+
+Extractor limitation (shared by the syntax gate, the inliner, and build-gallery): script bodies are
+matched up to the first `</script>`, so a literal `</script>` inside a JS string would truncate the
+body — exactly as a browser's HTML parser would, so a page like that is genuinely broken anyway and
+the gate flagging it is correct, not a false positive. Zero occurrences in the vendored libs today;
+the selftest's transform-pinning check guards a vendor bump reintroducing one.
 
 ## `manifest.json` — full shape
 

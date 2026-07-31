@@ -53,10 +53,55 @@ function extractResults(result) {
 // The server externalizes big chart documents: `html` arrives as a presigned URL, not markup.
 // (data: URLs are honored too so the selftest can exercise this path with zero network.)
 const URL_HTML = /^(https?:|data:)/i;
+// Only real http(s) URLs may fall back to curl — curl can't fetch data: URLs.
+const CURL_FALLBACK = /^https?:/i;
+
+// In the Claude harness sandbox, Node's fetch ignores the HTTP(S)_PROXY env that
+// curl honors (observed in the field 2026-07-30/31, twice). NODE_USE_ENV_PROXY=1
+// fixes it on Node >= 24 but must be set before node starts — so when we fail
+// terminally and a proxy env exists, say so in the error the agent will read.
+function proxyAdvice() {
+  return (process.env.HTTPS_PROXY || process.env.HTTP_PROXY)
+    ? " (this sandbox provides a proxy that Node's fetch ignores — re-run the bundler with NODE_USE_ENV_PROXY=1, Node >= 24)"
+    : '';
+}
+
+/** curl fallback. Returns the body, or null when curl is not installed. */
+function curlFetch(url) {
+  try {
+    return execFileSync('curl', ['-fsSL', '--max-time', '30', url], {
+      maxBuffer: 64 * 1024 * 1024, // presigned chart documents can be large — default 1MB ENOBUFS is a real failure
+      encoding: 'utf8',
+    });
+  } catch (e) {
+    if (e.code === 'ENOENT') return null;
+    throw new Error(
+      `html URL fetch failed via curl fallback (exit ${e.status ?? '?'}): ` +
+      `${String(e.stderr || e.message).trim().slice(0, 200)}${proxyAdvice()}`
+    );
+  }
+}
 
 async function resolveHtml(it) {
-  if (!URL_HTML.test(it.html.trim())) return it.html;
-  const res = await fetch(it.html.trim(), { signal: AbortSignal.timeout(30_000), redirect: 'follow' });
+  if (typeof it.html !== 'string') throw new Error(`html is not a string (got ${typeof it.html})`);
+  const src = it.html.trim();
+  if (!URL_HTML.test(src)) return it.html;
+
+  let res;
+  try {
+    // The try wraps ONLY the fetch call: an !res.ok (e.g. expired presigned URL
+    // — keep its expiry hint) or empty-body failure must NOT route to curl,
+    // which would just repeat the same HTTP failure 30 seconds slower.
+    res = await fetch(src, { signal: AbortSignal.timeout(30_000), redirect: 'follow' });
+  } catch (fetchErr) {
+    if (!CURL_FALLBACK.test(src)) throw fetchErr;
+    const body = curlFetch(src);
+    if (body == null) {
+      throw new Error(`html URL fetch failed: ${fetchErr.message}${proxyAdvice()}; curl not found for fallback`);
+    }
+    if (!body.trim()) throw new Error('html URL fetch (curl fallback) returned an empty body');
+    return body;
+  }
   if (!res.ok) throw new Error(`html URL fetch failed: HTTP ${res.status} (presigned URLs expire ~3h — re-run the tool for a fresh one)`);
   const body = await res.text();
   if (!body.trim()) throw new Error('html URL fetch returned an empty body');
@@ -88,11 +133,12 @@ function collectItems(input) {
 // disambiguate — don't ship it as "can't rebuild" without that check. (~30k+ tokens = a real run.)
 const SUSPECT_FALLBACK_INPUT_TOKENS = 15000;
 
-// The chart HTML must pass through the caller once (it lives only in the tool result — there is NO
-// harness auto-save of MCP results to disk, verified 2026-07-27), and that hand-off can drop the big
-// config <script>, yielding HTML that bundles but renders EMPTY. The guard for that
-// (looksLikeRealChart → manifest.payloadWarnings) lives in make-bundle.mjs so BOTH the fast path and
-// a direct make-bundle call catch it; here we just surface manifest.payloadWarnings as brokenWarning.
+// HTML that bundles but renders EMPTY has two known causes: inline-mode hand-off loss (the HTML
+// passes through the caller once — no harness auto-save of MCP results, verified 2026-07-27) and,
+// under URL mode, the SERVER emitting corrupted markup (2026-07-31: model-side backslash doubling →
+// SyntaxError in the fetched bytes — no hand-off involved). The guards for both (looksLikeRealChart
+// + scriptSyntaxErrors → manifest.payloadWarnings) live in make-bundle.mjs so BOTH the fast path and
+// a direct make-bundle call catch them; here we just surface manifest.payloadWarnings as brokenWarning.
 
 async function main(input, outDirArg) {
   const outDir = input.outDir || outDirArg;
@@ -135,7 +181,7 @@ async function main(input, outDirArg) {
   } else {
     // Reuse make-bundle.mjs verbatim so there is exactly one transform implementation.
     const mbInput = JSON.stringify({ outDir, charts });
-    const stdout = execFileSync('node', [join(HERE, 'make-bundle.mjs'), mbInput], {
+    const stdout = execFileSync(process.execPath, [join(HERE, 'make-bundle.mjs'), mbInput], {
       encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
     });
     manifest = JSON.parse(stdout);

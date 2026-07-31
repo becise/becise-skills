@@ -10,11 +10,12 @@
  *
  * Exits non-zero on the first failure. No network, no Chrome, no MCP calls.
  */
-import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, chmodSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { scriptSyntaxErrors } from './make-bundle.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MAKE = join(HERE, 'make-bundle.mjs');
@@ -41,19 +42,35 @@ new Chart(document.getElementById('c'),{type:'bar',data:{}});
 /* ${'pad '.repeat(220)} */</script></body></html>`;
 }
 
-function run(script, json) {
-  const out = execFileSync('node', [script], { input: JSON.stringify(json), encoding: 'utf8', maxBuffer: 64e6 });
+function run(script, json, opts = {}) {
+  const out = execFileSync(process.execPath, [script], { input: JSON.stringify(json), encoding: 'utf8', maxBuffer: 64e6, ...opts });
   return JSON.parse(out);
 }
-function runExpectFail(script, json) {
+function runExpectFail(script, json, opts = {}) {
   try {
-    execFileSync('node', [script], { input: JSON.stringify(json), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] });
+    execFileSync(process.execPath, [script], { input: JSON.stringify(json), encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'], ...opts });
   } catch (e) { return String(e.stderr || ''); }
   throw new Error('expected a non-zero exit, got success');
 }
 
 const tmp = mkdtempSync(join(tmpdir(), 'becise-selftest-'));
 const dir = n => join(tmp, n);
+
+// ── curl shims (keep the fallback path hermetic — never spawn the real curl) ──
+// bundle-from-critique's curl fallback fires whenever fetch throws; a PATH shim
+// makes each outcome deterministic. env inherits process.env with the shim first.
+function curlShim(name, body) {
+  const d = join(tmp, `shim-${name}`);
+  mkdirSync(d, { recursive: true });
+  const p = join(d, 'curl');
+  writeFileSync(p, body);
+  chmodSync(p, 0o755);
+  return d;
+}
+const shimEnv = (shimDir) => ({ env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}` } });
+// fetch-unreachable trigger: undici rejects port 1 as a "bad port" BEFORE any
+// network I/O, so this throws instantly and hermetically.
+const UNREACHABLE = 'https://127.0.0.1:1/chart.html';
 
 process.stdout.write('becise-chart selftest\n');
 
@@ -170,18 +187,56 @@ check('URL-mode html is fetched and bundled, not written as the chart', () => {
   assert(raw.startsWith('<!DOCTYPE html>'), 'raw.html must hold the fetched markup, not the URL string');
 });
 
-check('an unreachable html URL skips that chart with a reason, not the bundle', () => {
+check('an unreachable html URL (fetch AND curl fail) skips that chart with a reason, not the bundle', () => {
+  const failShim = curlShim('fail', '#!/bin/sh\nexit 7\n');
   const r = run(FROM, {
     outDir: dir('urlfail'),
     critiques: [
       { results: [{ chart_id: 'ok1', html: chartHtml({ title: 'Inline survivor' }) }] },
-      { results: [{ chart_id: 'gone1', html: 'https://127.0.0.1:1/expired.html' }] },
+      { results: [{ chart_id: 'gone1', html: UNREACHABLE }] },
     ],
-  });
+  }, shimEnv(failShim));
   assert(r.bundled.join(',') === 'ok1', `inline chart must survive, got ${r.bundled.join(',')}`);
   const s = r.skipped.find(x => x.chart_id === 'gone1');
   assert(s, 'unfetchable chart must be recorded in skipped');
+  assert(/curl/i.test(s.reason), `reason should show the curl fallback was tried, got: ${s.reason}`);
   assert(r.manifest.charts.some(c => c.chart_id === 'gone1' && c.isFallback), 'and recorded in the manifest as fallback');
+});
+
+// The sandbox failure mode this exists for: Node's fetch ignores the harness proxy
+// (ENOTFOUND / bad port) while curl works. The shim proves the rescue end-to-end
+// with zero network.
+check('curl fallback rescues a fetch-unreachable URL', () => {
+  const fixture = join(tmp, 'curlok-fixture.html');
+  writeFileSync(fixture, chartHtml({ title: 'Rescued by curl' }));
+  const okShim = curlShim('ok', `#!/bin/sh\ncat "${fixture}"\n`);
+  const r = run(FROM, {
+    outDir: dir('curlok'),
+    result: { results: [{ chart_id: 'cf1', html: UNREACHABLE }] },
+  }, shimEnv(okShim));
+  assert(r.bundled.join(',') === 'cf1', `expected cf1 bundled via curl, got ${r.bundled.join(',')} (skipped: ${JSON.stringify(r.skipped)})`);
+  assert(!r.brokenWarning, `rescued chart should have a real payload, got: ${r.brokenWarning}`);
+  assert(r.manifest.charts[0].title === 'Rescued by curl', 'metadata should come from the curl-fetched markup');
+});
+
+check('curl fallback returning an empty body skips the chart with a reason', () => {
+  const emptyShim = curlShim('empty', '#!/bin/sh\nexit 0\n');
+  const r = run(FROM, {
+    outDir: dir('curlempty'),
+    result: { results: [{ chart_id: 'ce1', html: UNREACHABLE }] },
+  }, shimEnv(emptyShim));
+  assert(r.bundled.length === 0, 'nothing should bundle from an empty body');
+  const s = r.skipped.find(x => x.chart_id === 'ce1');
+  assert(s && /empty body/i.test(s.reason), `reason should name the empty body, got: ${s?.reason}`);
+});
+
+check('non-string html is skipped with a readable reason', () => {
+  const r = run(FROM, {
+    outDir: dir('nonstring'),
+    result: { results: [{ chart_id: 'ns1', html: { unexpected: 'object' } }] },
+  });
+  const s = r.skipped.find(x => x.chart_id === 'ns1');
+  assert(s && /not a string/i.test(s.reason), `expected a type-guard reason, got: ${s?.reason}`);
 });
 
 // rebuild_chart returns ONE chart per call — a bare object, not results[].
@@ -195,6 +250,86 @@ check('single-object rebuild_chart result shapes are accepted', () => {
   });
   assert(r.bundled.sort().join(',') === 'solo1,solo2', `both single-object shapes must bundle, got ${r.bundled.join(',')}`);
 });
+
+// 6. Server-corrupt code (2026-07-31: model-side backslash doubling → SyntaxError → chart
+//    bundles fine and renders BLANK). The syntax gate must flag it as emptyPayload, name the
+//    error, and still write the files (for forensics / a manual fix).
+check('syntax-corrupt HTML is flagged emptyPayload with the parse error named, files still written', () => {
+  const raw = dir('syn.raw.html');
+  // The incident corruption shape: doubled backslashes free the inner "/" to end the regex early.
+  const corrupt = chartHtml({ title: 'Broken transcription' })
+    .replace('</body>', `<script>function beciseSplitEntityName(n){return n.split(/\\\\s*\\\\/\\\\s*/);}</script></body>`);
+  writeFileSync(raw, corrupt);
+  const m = run(MAKE, { outDir: dir('syn'), charts: [{ chart_id: 'syn', rawHtmlPath: raw }] });
+  assert(m.charts[0].emptyPayload === true, 'syntax-dead chart must be flagged emptyPayload');
+  assert(m.payloadWarnings.some(w => /JS syntax error in inline script #\d+/.test(w)), `warning must name the script and error, got: ${m.payloadWarnings.join('; ')}`);
+  assert(m.payloadWarnings.some(w => /re-run the tool once/i.test(w)), 'warning must carry the re-run guidance');
+  readFileSync(join(dir('syn'), 'syn.web.html'), 'utf8'); // files written despite the flag
+});
+
+// 7. Placeholder metadata (same incident): "<chart_title>" must not suppress the real <h1>.
+check('placeholder metadata is nulled; title falls back to the real <h1>', () => {
+  const raw = dir('ph.raw.html');
+  const html = chartHtml({ title: 'Fallback Heading' })
+    .replace(/"chart_title":"[^"]*"/, '"chart_title":"<chart_title>"')
+    .replace(/"key_insight":"[^"]*"/, '"key_insight":"<key_insight>"');
+  writeFileSync(raw, html);
+  const m = run(MAKE, { outDir: dir('ph'), charts: [{ chart_id: 'ph', rawHtmlPath: raw }] });
+  assert(m.charts[0].title === 'Fallback Heading', `title should fall back to the <h1>, got: ${m.charts[0].title}`);
+  assert(m.charts[0].key_insight === null, `placeholder key_insight should be null, got: ${m.charts[0].key_insight}`);
+  assert(m.charts[0].emptyPayload === false, 'placeholder metadata alone is not an empty payload');
+});
+
+// 8. The transforms themselves must not corrupt scripts (a vendor bump reintroducing a literal
+//    </script> would break web/artifact only — a LOCAL bug, not a re-run-the-tool case). Pin them.
+check('transform outputs stay syntax-valid: web.html, artifact.html, gallery', () => {
+  const web = readFileSync(join(dir('merge'), 'slide3_chart1.web.html'), 'utf8');
+  const webFails = scriptSyntaxErrors(web);
+  assert(webFails.length === 0, `web.html scripts must parse, got: ${JSON.stringify(webFails)}`);
+  const art = readFileSync(join(dir('merge'), 'slide3_chart1.artifact.html'), 'utf8');
+  const artFails = scriptSyntaxErrors(art);
+  assert(artFails.length === 0, `artifact.html scripts must parse, got: ${JSON.stringify(artFails)}`);
+  const gallery = join(HERE, '..', 'becise-place', 'build-gallery.mjs');
+  if (existsSync(gallery)) {
+    const out = join(dir('merge'), 'gallery.html');
+    execFileSync(process.execPath, [gallery], { input: JSON.stringify({ dir: dir('merge'), out, title: 'Pin' }), encoding: 'utf8', maxBuffer: 64e6 });
+    const gFails = scriptSyntaxErrors(readFileSync(out, 'utf8'));
+    assert(gFails.length === 0, `gallery scripts must parse, got: ${JSON.stringify(gFails)}`);
+  }
+});
+
+// 9. HTTP-status failures must NOT consult curl (an expired presigned URL 403s identically
+//    over any route; retrying it via curl just loses the expiry hint and 30s). Needs a real
+//    HTTP response → loopback server in a child process (execFileSync blocks this process's
+//    event loop, so the server can't live here). Some sandboxes block listening — skip, not fail.
+{
+  const srv = spawn(process.execPath, ['-e',
+    "const http=require('http');const s=http.createServer((q,r)=>{r.statusCode=403;r.end('denied')});" +
+    "s.listen(0,'127.0.0.1',()=>console.log(s.address().port));"
+  ], { stdio: ['ignore', 'pipe', 'ignore'] });
+  const port = await new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), 4000);
+    srv.stdout.once('data', d => { clearTimeout(timer); resolve(parseInt(String(d).trim(), 10) || null); });
+    srv.on('error', () => { clearTimeout(timer); resolve(null); });
+    srv.on('exit', () => { clearTimeout(timer); resolve(null); });
+  });
+  if (port == null) {
+    process.stdout.write('  skip HTTP-status failures do not consult curl (sandbox blocks loopback listen)\n');
+  } else {
+    check('HTTP-status failures do not consult curl', () => {
+      const wouldSucceedShim = curlShim('would-succeed', `#!/bin/sh\necho "<!DOCTYPE html><html>curl should not have run</html>"\n`);
+      const r = run(FROM, {
+        outDir: dir('http403'),
+        result: { results: [{ chart_id: 'h1', html: `http://127.0.0.1:${port}/expired.html` }] },
+      }, shimEnv(wouldSucceedShim));
+      assert(r.bundled.length === 0, 'a 403 must not bundle');
+      const s = r.skipped.find(x => x.chart_id === 'h1');
+      assert(s && /HTTP 403/.test(s.reason), `reason must carry the HTTP status, got: ${s?.reason}`);
+      assert(/expire/i.test(s.reason), 'the presigned-expiry hint must survive');
+    });
+  }
+  srv.kill();
+}
 
 // The manifest is a consumed contract (becise-place reads it) — hold its shape.
 check('manifest is versioned and every entry has the same keys', () => {

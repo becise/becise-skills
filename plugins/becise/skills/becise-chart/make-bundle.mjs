@@ -22,6 +22,7 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const FONT_STACK = "'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif";
@@ -84,10 +85,59 @@ function inlineExternals(html, vendorDir) {
   return { html, deps, warnings };
 }
 
+// The server has been observed emitting the prompt's literal placeholders as metadata
+// ({"chart_title":"<chart_title>", …}, incident 2026-07-31). A truthy placeholder title
+// suppresses the real <h1> fallback below and leaks "<key_insight>" into gallery captions —
+// treat placeholder values as absent.
+const METADATA_PLACEHOLDER_RE = /^<\w+>$/;
+
 function extractMetadata(html) {
   const m = html.match(/<script[^>]*id=["']becise-metadata["'][^>]*>([\s\S]*?)<\/script>/i);
-  if (m) { try { return JSON.parse(m[1].trim()); } catch { /* fall through */ } }
+  if (m) {
+    try {
+      const meta = JSON.parse(m[1].trim());
+      if (meta && typeof meta === 'object') {
+        for (const [k, v] of Object.entries(meta)) {
+          if (typeof v === 'string' && METADATA_PLACEHOLDER_RE.test(v)) meta[k] = null;
+        }
+        return meta;
+      }
+    } catch { /* fall through */ }
+  }
   return {};
+}
+
+// ── Inline-JS syntax gate (FINAL SPEC S10) ─────────────────────────────────
+// A chart whose helper <script> has a hard SyntaxError bundles cleanly, publishes,
+// and renders BLANK (incident 2026-07-31: model-side backslash doubling). Compile
+// (never execute) each inline classic-JS script of the RAW html; failures fold into
+// emptyPayload — no new manifest key, so every existing consumer's emptyPayload
+// guard already protects it. Vendored libs are still src= refs at raw stage → skipped.
+const JS_SCRIPT_TYPES = new Set(['', 'text/javascript', 'application/javascript', 'text/ecmascript', 'application/ecmascript']);
+
+export function scriptSyntaxErrors(html) {
+  const failures = [];
+  try {
+    const re = /<script\b([^>]*)>([\s\S]*?)<\/script\s*>/gi;
+    let m, i = -1;
+    while ((m = re.exec(html)) !== null) {
+      i++;
+      const attrs = m[1] || '';
+      if (/(?:^|[\s"'])src\s*=/i.test(attrs)) continue; // external — browser ignores the body
+      const t = /(?:^|[\s"'])type\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s>]+))/i.exec(attrs);
+      if (t && !JS_SCRIPT_TYPES.has((t[1] ?? t[2] ?? t[3] ?? '').trim().toLowerCase())) continue;
+      try {
+        new vm.Script(m[2]); // compiles only, never executes
+      } catch (e) {
+        failures.push({ scriptIndex: i, error: String(e?.message ?? e) });
+      }
+    }
+  } catch {
+    // Validator bug must never block bundling — fail open (parse errors above are the
+    // only fail-closed path).
+    return [];
+  }
+  return failures;
 }
 
 function extractTitle(html) {
@@ -126,9 +176,11 @@ function toArtifactFragment(webHtml, title) {
   return `<style>\n${css}\n${hostCss}\n</style>\n${headScripts}\n<div id="becise-artifact-host">\n${body}\n</div>\n`;
 }
 
-// A real Becise chart carries a data payload (Chart.js call, grid table, or inline SVG). HTML that
-// lost its config <script> during the caller's hand-off still bundles but renders EMPTY — flag it.
-// Lives here (not just in bundle-from-critique) so BOTH entry paths get the guard.
+// A real Becise chart carries a data payload (Chart.js call, grid table, or inline SVG). HTML
+// missing it still bundles but renders EMPTY — flag it. Causes seen in the field: truncated
+// fetches, and (2026-07-31) the SERVER emitting corrupted markup — under URL mode the bytes
+// arrive fetched-from-S3, so breakage is not a caller hand-off problem. Lives here (not just in
+// bundle-from-critique) so BOTH entry paths get the guard.
 function looksLikeRealChart(html) {
   if (!html || html.length < 800) return false;
   return /new Chart\s*\(|becise-grid|canonicalData|\brawData\b|const\s+series|<svg|<polyline/i.test(html);
@@ -231,7 +283,8 @@ function main(input) {
     )].map(m => m[2] ?? m[3]);
     for (const u of leftover) warnings.push(`EXTERNAL REF NOT INLINED in web.html: ${u}`);
 
-    const emptyPayload = !looksLikeRealChart(raw);
+    const syntaxFailures = scriptSyntaxErrors(raw);
+    const emptyPayload = !looksLikeRealChart(raw) || syntaxFailures.length > 0;
     manifest.charts.push(manifestEntry({
       chart_id: id,
       chart_type: meta.chart_type || null,
@@ -246,7 +299,16 @@ function main(input) {
       files,
     }));
     manifest.warnings.push(...warnings.map(w => `[${id}] ${w}`));
-    if (emptyPayload) manifest.payloadWarnings.push(`[${id}] HTML has no detectable chart payload — likely truncated/placeholder/mis-transcribed; will render EMPTY`);
+    if (syntaxFailures.length > 0) {
+      for (const f of syntaxFailures) {
+        manifest.payloadWarnings.push(
+          `[${id}] JS syntax error in inline script #${f.scriptIndex}: ${f.error} — the server emitted ` +
+          `broken code; the chart will render EMPTY. Re-run the tool once for this chart; if it recurs, report it.`
+        );
+      }
+    } else if (emptyPayload) {
+      manifest.payloadWarnings.push(`[${id}] HTML has no detectable chart payload — likely truncated/placeholder/mis-transcribed; will render EMPTY`);
+    }
   }
 
   writeFileSync(join(outDir, 'manifest.json'), JSON.stringify(manifest, null, 2) + '\n');

@@ -138,10 +138,16 @@ parallel (each returns its own `jobId`):
 - `context.text`: what surrounds the chart — the slide/page/panel's other content, in your words.
   You've SEEN the full view; describe it. Don't upload it.
 
-Poll `get_result` per jobId on `{state:"pending"}` (typically 1–3 min per chart; occasionally
-longer under provider degradation — keep polling; tell the user it's running). Don't hand-save the
+Poll `get_result` per jobId on `{state:"pending"}` (typically 1–3 min per chart; a chart the
+server internally retried can take up to ~8 min, and provider degradation stretches it further —
+**keep polling, never re-submit a pending job**; tell the user it's running). Don't hand-save the
 HTML — Step 3 does it. Successful results carry `html` as a **presigned URL** (~3h), not inline
 markup; Step 3's bundler fetches it.
+
+**GLOBAL retry cap: at most ONE re-run per chart in total, whatever the trigger** — low-token
+fallback, content_filter, syntax warning, or empty payload. The per-trigger notes below never
+stack: a chart that fails after its one re-run is reported with its reason, not retried again and
+never hand-patched.
 
 **If `rebuild_chart` is not in the tool listing** (older server), fall back to the legacy
 `chart_critique` contract: one call per source image with the FULL view's url and all its charts in
@@ -154,12 +160,13 @@ times as it takes, until you get `done` or `error`.
 
 **Fallbacks with low `usage.inputTokens`** (a few k, vs ~30k+ for a real run) mean the image was
 barely processed, not that the chart is un-chartable. Look at the uploaded crop again — wrong file,
-blank render, stale export? Fix and retry that one chart ONCE. Rebuilds → the first image was bad.
-Identical low-token fallback → genuinely un-chartable, carry it through flagged.
+blank render, stale export? Fix and retry that one chart ONCE (this is the chart's one re-run).
+Rebuilds → the first image was bad. Identical low-token fallback → genuinely un-chartable, carry it
+through flagged.
 
 **`isFallback` with a filter/incomplete reason** (e.g. `content_filter`) should be rare now that
 crops are the default input. If one still fires, tighten the crop further (chart marks + axis labels
-only) and retry that one chart ONCE.
+only) and retry that one chart ONCE (this is the chart's one re-run).
 
 ## Step 3 — Build the bundle
 
@@ -171,10 +178,14 @@ a fresh URL).
 
 ```
 # one chart:
-echo '{"outDir":"<dir>","result":<rebuild_chart result>}'                  | node <SKILL_DIR>/bundle-from-critique.mjs
+echo '{"outDir":"<dir>","result":<rebuild_chart result>}'                  | NODE_USE_ENV_PROXY=1 node <SKILL_DIR>/bundle-from-critique.mjs
 # several charts → ONE merged bundle:
-echo '{"outDir":"<dir>","critiques":[<result A>,<result B>,…]}'            | node <SKILL_DIR>/bundle-from-critique.mjs
+echo '{"outDir":"<dir>","critiques":[<result A>,<result B>,…]}'            | NODE_USE_ENV_PROXY=1 node <SKILL_DIR>/bundle-from-critique.mjs
 ```
+
+`NODE_USE_ENV_PROXY=1` is the fast path for sandboxes whose proxy Node's fetch ignores (Node ≥ 24;
+harmless elsewhere). On older Nodes the bundler falls back to `curl` by itself — and if a fetch
+still fails terminally, its skip reason says exactly what to do.
 
 Writes per chart: `<id>.raw.html` (the fetched/returned markup), `<id>.web.html` (self-contained,
 opens offline), `<id>.artifact.html` (body fragment for the Artifact tool), plus a shared
@@ -187,7 +198,8 @@ the bundle dir.
 | --- | --- | --- |
 | `warning` | low-token fallback | re-check the crop, retry once (Step 2) |
 | `skipped[].reason` mentions URL fetch | presigned `html` URL expired/unreachable | re-run the tool for that chart, re-bundle |
-| `brokenWarning` / `payloadWarnings` | bundled HTML has no chart payload, renders EMPTY | don't publish it; re-check the raw file |
+| `payloadWarnings` naming a **JS syntax error** | the server emitted broken code; the chart renders EMPTY | never publish or hand-patch it; re-run the tool ONCE for that chart (the global cap); recurs → report it |
+| `brokenWarning` / other `payloadWarnings` | bundled HTML has no chart payload, renders EMPTY | don't publish it; re-check the raw file |
 | `nothingRebuilt` | every chart came back `isFallback` | publish nothing; report the failures |
 | `warnings[]` | external ref survived inlining, unknown dep, or `VENDOR VERSION MISMATCH` | see NOTES.md |
 
@@ -236,4 +248,5 @@ never absent). Full shape in NOTES.md.
 - Translate script errors into plain language for the user; don't paste raw stack output.
 - **After editing any `.mjs` here, run `node <SKILL_DIR>/selftest.mjs`** (no network, Chrome, or
   MCP). It covers the silent-failure modes: id collision, quote-blind inlining, all-fallback,
-  payload-less HTML, URL-mode html, single-object results, manifest shape.
+  payload-less HTML, syntax-corrupt HTML, placeholder metadata, URL-mode html (fetch + curl
+  fallback), single-object results, transform pinning, manifest shape.
