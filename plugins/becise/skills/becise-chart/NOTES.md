@@ -120,6 +120,18 @@ Sandbox note: in the Claude harness, Node's `fetch` ignores the `HTTP(S)_PROXY` 
 provides (curl honors it) — the bundler falls back to `curl` on any fetch throw, and its terminal
 error names `NODE_USE_ENV_PROXY=1` (Node ≥ 24) when a proxy env is present.
 
+## Why Step 4 verifies visually
+
+2026-07-31, slide-3 waterfall: the server emitted syntactically flawless code whose data points
+used the vertical-bar convention under a horizontal `indexAxis` — every value parsed NaN, the chart
+rendered axes, gridlines, and labels, and **zero bars**. It passed the server's syntax gate, the
+bundler's payload + syntax checks, and got published. No parser can catch semantically-wrong code;
+a 4-second render + look catches the whole draws-nothing class regardless of cause. The check is
+data-integrity only (marks present, magnitudes sane) — design judgment stays Becise's. The
+"re-run once then STOP" rule exists because semantic bugs are systematic (same prompt, same model,
+low temperature → the re-run usually reproduces the bug); the check's durable value is converting
+a silently-published broken chart into a detected, reportable event.
+
 Extractor limitation (shared by the syntax gate, the inliner, and build-gallery): script bodies are
 matched up to the first `</script>`, so a literal `</script>` inside a JS string would truncate the
 body — exactly as a browser's HTML parser would, so a page like that is genuinely broken anyway and

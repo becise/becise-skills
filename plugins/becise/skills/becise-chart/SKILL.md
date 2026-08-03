@@ -244,7 +244,30 @@ Lower level, if you already have `.raw.html` on disk:
 ## Step 4 — Show the chart (do not skip)
 
 **The user asked to see a better chart. Show it before you talk about it.** Files they can't see
-feel like the job didn't finish. No Chrome, no PNG, no `becise-place` needed.
+feel like the job didn't finish. No Chrome, no PNG, no `becise-place` needed to SHOW — but verify
+first when you can:
+
+**Verify visually BEFORE publishing (when Chrome is available).** Syntactically perfect chart code
+can still draw nothing (observed in the field: axes and labels rendered, zero bars — a data-shape
+bug no parser can catch). If `becise-place` is installed and its preflight finds Chrome, render
+each chart (~4s) and LOOK at the PNG:
+
+```
+node <becise-place dir>/render-png.mjs '{"webHtmlPath":"<dir>/<id>.web.html","out":"<dir>/<id>.check.png","width":900,"height":560}'
+```
+
+- **Data marks present?** Bars/lines/points/cells visible — not just axes, gridlines, and labels.
+  A `grid` chart renders as an HTML table and facet layouts mount at runtime: table cells / panel
+  charts count as marks. An all-zero series legitimately shows near-empty bars with "0" labels —
+  that counts too.
+- **Grossly consistent with the source?** The values you can read off the render should match the
+  chart you sent (right magnitudes, right number of categories). Judge data integrity only — the
+  design (chart type, colors, layout) is Becise's call, never re-litigate it.
+- Fails either check → that is the chart's ONE re-run (global cap). The re-run renders broken the
+  same way → **report it with the check PNG as evidence and publish nothing for that chart** — a
+  systematic rendering bug won't fix itself by resampling, and publishing a blank or wrong chart
+  is worse than a clear failure report.
+- No Chrome / no `becise-place` → publish as normal and note the chart is visually unverified.
 
 - **One chart** → publish its `<id>.artifact.html` **directly** with the Artifact tool. It's already
   a deps-inlined fragment in a sized card. Don't re-design, rewrite, or wrap it.
