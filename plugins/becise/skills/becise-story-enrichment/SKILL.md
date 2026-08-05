@@ -3,24 +3,24 @@ name: becise-story-enrichment
 description: >
   Enrich the story behind a slide before critique/build, then always get human
   consent on the raw critique. Activate when slide_analyze returns (especially
-  with context_gaps / uncertain so_what), when slide_revision_v2_critique is
+  with context_gaps / uncertain so_what), when slide_revision:critique is
   about to run or has just returned, when the user asks to improve or rebuild
   a slide, or when you would have used the deprecated improve_slide_pptx
   assessment/confirm flow. Search Drive, email, notes, briefs, and prior chat
   for why the slide exists and what takeaway the audience should leave with;
-  never skip the human ask; never call slide_revision_v2_build without consent.
+  never skip the human ask; never call slide_revision:build without consent.
 ---
 
 # Story enrichment (slide-revision-v2)
 
 You help Becise understand **why this slide exists** and **what takeaway the audience should leave with**, then make sure a human has seen the critique before any rebuild.
 
-You do **not** build slides yourself. After enrichment and consent, call `slide_revision_v2_build`. Exhibits, recommendations, tree, and Arranger run on the server.
+You do **not** build slides yourself. After enrichment and consent, call `slide_revision:build`. Exhibits, recommendations, tree, and Arranger run on the server.
 
 ## Do not
 
 - Call `improve_slide_pptx` (deprecated — no `storyConfirmed` / assessment envelopes).
-- Call `slide_revision_v2_build` before the human has seen the raw critique and agreed.
+- Call `slide_revision:build` before the human has seen the raw critique and agreed.
 - Use Google Workspace apply / Sheets flows for this path.
 - Tell the user their slide is confusing or poorly made.
 - Invent chart or table numbers.
@@ -30,7 +30,7 @@ You do **not** build slides yourself. After enrichment and consent, call `slide_
 Typical path:
 
 1. `slide_analyze` has run (or is about to), **or**
-2. You’re preparing `slide_revision_v2_critique`, **or**
+2. You’re preparing `slide_revision:critique`, **or**
 3. Critique just returned and you must present it / ask to build.
 
 ## Your job (in order)
@@ -72,7 +72,7 @@ If search finds nothing useful, proceed anyway with whatever you have. Still alw
 ### 3. Call critique with enrichment
 
 ```
-slide_revision_v2_critique({
+slide_revision:critique({
   slideNumber,
   slideImage,           // prefer get_upload_url; reuse the same url later
   slideText?,
@@ -106,7 +106,7 @@ Collect optional **`critiqueFeedback`**. If they correct the takeaway, set `conf
 ### 5. On consent → build
 
 ```
-slide_revision_v2_build({
+slide_revision:build({
   slideNumber,
   slideImage,              // same url
   slideText?,
@@ -133,7 +133,7 @@ Poll `get_result` (often 2–4 minutes with charts).
 |---------|--------|
 | Drive / email / notes search | **This skill** |
 | Human sees raw critique + consent | **This skill** |
-| Exhibits, recommend, tree, Arranger | Server (`slide_revision_v2_build`) |
+| Exhibits, recommend, tree, Arranger | Server (`slide_revision:build`) |
 
 **Deprecated:** `improve_slide_pptx`, `storyConfirmed`, `stage: assessment`, `confirm.*`, `planned_work` as required UI.
 

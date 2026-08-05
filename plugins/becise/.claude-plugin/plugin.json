@@ -1,5 +1,5 @@
 {
   "name": "becise",
-  "description": "Rebuild any chart from any source (slide, PDF, dashboard, screenshot) via the Becise MCP, show it live, and place it into Slides/Docs or export as PNG. Also enriches slide story context and gets human consent on critique before slide_revision_v2_build. Bundles the becise-chart, becise-place, and becise-story-enrichment skills.",
-  "version": "2.0.0"
+  "description": "Rebuild any chart from any source (slide, PDF, dashboard, screenshot) via the Becise MCP, show it live, and place it into Slides/Docs or export as PNG. Also enriches slide story context and gets human consent on critique before slide_revision:build. Bundles the becise-chart, becise-place, and becise-story-enrichment skills.",
+  "version": "3.0.0"
 }
