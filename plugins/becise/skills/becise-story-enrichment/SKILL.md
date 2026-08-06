@@ -5,9 +5,10 @@ description: >
   get consent on the raw critique. Activate when slide_analyze returns, when
   slide_revision_critique is about to run or has just returned, when the user asks
   to improve or rebuild a slide, or when you would have used the deprecated
-  improve_slide_pptx assessment/confirm flow. Always ask one targeted job/claim
-  question before critique; never search Drive, email, notes, or briefs for this
-  path; never skip the human ask after critique; never call slide_revision_build
+  improve_slide_pptx assessment/confirm flow. Always ask what takeaway the
+  audience should leave with before critique (plain language — never jargon like
+  claim/job in chat); never search Drive, email, notes, or briefs for this path;
+  never skip the human ask after critique; never call slide_revision_build
   without consent.
 ---
 
@@ -25,7 +26,7 @@ You do **not** build slides yourself. After ask #1, critique, and ask #2 consent
 - Use Google Workspace apply / Sheets flows for this path.
 - Tell the user their slide is confusing or poorly made.
 - Invent chart or table numbers.
-- Skip ask #1 because the claim looks clear, so-what looks confident, or the user said “just fix it.”
+- Skip ask #1 because the takeaway looks clear, so-what looks confident, or the user said “just fix it.”
 
 ## When you activate
 
@@ -48,28 +49,29 @@ From `slide_analyze` (when available), note:
 
 Use prior conversation in this thread and any `deckContext` already supplied as passive framing. Do **not** open connector search tools.
 
-### 2. Always ask #1 — lock job / claim
+### 2. Always ask #1 — what should the audience take away?
 
-**Every time**, before critique, ask **one** targeted question that ascertains:
+**Every time**, before critique, ask the human **one** natural question. Prefer plain language — never jargon like “claim,” “job,” “core_claim,” or “confirmedClaim” in the chat.
 
-- What the slide is **for** (job)
-- What takeaway the audience should leave with (**claim**), when the slide argues
+For slides that argue a point, ask something like:
 
-Frame a concrete reading from analyze. Fold gaps and candidate claims into the **same** question — do not interrogate.
+- “What’s the key idea you want your audience to come away with after this slide?”
+- Or offer a reading and check it: “I’m reading this as: June’s IVR changes are working — 3 of 4 metrics improved. Is that what you want people to take away? And is 18% above target for your audience?”
 
-Tone: collaborative, brief, concrete. Offer a reading; don’t accuse.
+For slides that don’t argue (title, divider, agenda, thank-you), ask what the slide is *for*:
 
-Examples:
+- “Looks like this opens the Market Outlook section — is that right?”
 
-- “I’m reading this as arguing that June’s IVR changes are working — 3 of 4 metrics improved. Is that the takeaway, and is 18% above target for your audience?”
-- For a divider: “Looks like this opens the Market Outlook section — right?”
+Use analyze to frame a concrete guess when you can; fold gaps into the same question. Collaborative, brief — don’t interrogate or accuse.
 
-Map the answer:
+**After they answer** (map privately — do not show field names to the user):
 
-- **Argument slide, agreement** → echo the reading as `confirmedClaim`
-- **Argument slide, correction** → their declarative insight sentence as `confirmedClaim`
-- **Non-argument** (`claim_confidence: not_applicable`) → confirm job only; **omit** `confirmedClaim`
+- **Argument slide, agreement** → echo the reading as `confirmedClaim` (optionally also `confirmedJob`)
+- **Argument slide, correction** → their takeaway sentence as `confirmedClaim`
+- **Non-argument** (`claim_confidence: not_applicable`) → set `confirmedJob` only; **omit** `confirmedClaim`
 - Extra color they volunteer → `narrativeContext`
+
+The server requires one of those fields on critique (empty strings don’t count).
 
 ### 3. Call critique with enrichment
 
@@ -80,7 +82,8 @@ slide_revision_critique({
   slideText?,
   deckContext?,
   narrativeContext?,
-  confirmedClaim?
+  confirmedClaim?,      // argument slides
+  confirmedJob?         // required alone for non-argument; or alongside claim
 })
 ```
 
@@ -133,7 +136,7 @@ Poll `get_result` (often 2–4 minutes with charts).
 
 | Concern | Owner |
 |---------|--------|
-| Ask #1 job/claim (no connector search) | **This skill** |
+| Ask #1 audience takeaway (plain language; no connector search) | **This skill** |
 | Human sees raw critique + ask #2 | **This skill** |
 | Exhibits, recommend, tree, Arranger | Server (`slide_revision_build`) |
 

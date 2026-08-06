@@ -5,16 +5,16 @@ description: >
   into a polished PPTX (or a headline-only fix). Activate whenever the user uploads
   a slide PNG/screenshot for revision, asks to improve a slide, or you are about to
   call slide_revision_critique / slide_revision_build / improve_slide_pptx.
-  Do NOT use the deprecated improve_slide_pptx tool. Always ask the human to lock
-  job/claim before critique; never search Drive/email/notes for enrichment; always
-  show the raw critique before building.
+  Do NOT use the deprecated improve_slide_pptx tool. Always ask what takeaway the
+  audience should leave with before critique; never search Drive/email/notes for
+  enrichment; always show the raw critique before building.
 ---
 
 # Slide revision v2
 
-Rebuild one slide with Becise MCP tools. You own ask #1 (job/claim), ask #2 (build
-consent), and sequencing. The server owns exhibits, recommendations, tree, and
-Arranger — only after consent.
+Rebuild one slide with Becise MCP tools. You own ask #1 (audience takeaway), ask #2
+(build consent), and sequencing. The server owns exhibits, recommendations, tree,
+and Arranger — only after consent.
 
 For the enrichment / human-ask details, follow the same contract as
 `becise-story-enrichment` (this skill embeds that sequence so either skill can drive
@@ -27,15 +27,15 @@ the flow).
 - Do **not** search Google Drive, email, meeting notes, briefs, or other connected file systems to enrich the story.
 - Do **not** use Google Workspace / Slides apply flows for this product path.
 - Do **not** invent chart or table numbers.
-- Do **not** skip ask #1 because the claim looks clear or the user said “just fix it.”
+- Do **not** skip ask #1 because the takeaway looks clear or the user said “just fix it.”
 
 ## Mandatory sequence
 
 ```
 1. Prepare slide inputs (image via get_upload_url when large)
 2. slide_analyze          ← job, claim, so_what, context_gaps
-3. ASK #1                 ← always lock job/claim with the human
-4. slide_revision_critique  ← with confirmedClaim / narrativeContext
+3. ASK #1                 ← “what should the audience take away?” (human language)
+4. slide_revision_critique  ← confirmedClaim and/or confirmedJob (server-required)
 5. ASK #2                 ← show raw critique → ready to build?
 6. slide_revision_build     ← only after yes
 7. Handle outcome: headline_only | ready | blocked / pending
@@ -66,18 +66,34 @@ Prior chat + supplied `deckContext` are fair game as passive context.
 
 ### 3. Always ask #1 (before critique)
 
-**Always** ask one targeted question that locks job and claim with the human.
+**Always** ask the human one natural question before critique. Prefer plain language —
+never say “claim,” “job,” or tool field names in the chat.
 
-- Offer a concrete reading; fold gaps/candidates into the same question
-- Argument slides → set `confirmedClaim` (echo reading on agreement, or their correction)
-- Non-argument slides (`not_applicable`) → confirm **job** only; omit `confirmedClaim`
+For argument slides, something like:
+
+- “What’s the key idea you want your audience to come away with after this slide?”
+- Or check a reading: “I’m reading this as arguing that June’s IVR changes are working.
+  Is that what you want people to take away?”
+
+For non-argument slides (title, divider, agenda): ask what the slide is for —
+e.g. “Looks like this opens the Market Outlook section — right?”
+
+Use analyze to offer a concrete reading when you can; fold gaps into the same question.
+
+**After they answer** (map privately):
+
+- Argument slides → `confirmedClaim` (echo or their correction); optionally `confirmedJob`
+- Non-argument (`not_applicable`) → `confirmedJob` only; omit `confirmedClaim`
 - Volunteer color → `narrativeContext`
+
+The server rejects critique if neither field is set (empty strings don’t count).
 
 **Banned:** Drive / email / notes / briefs / PRD corpus search.
 
 ### 4. `slide_revision_critique`
 
-Call with the same slide inputs plus enrichment from ask #1:
+Call with the same slide inputs plus enrichment from ask #1. At least one of
+`confirmedClaim` / `confirmedJob` is required:
 
 ```
 slide_revision_critique({
@@ -86,7 +102,8 @@ slide_revision_critique({
   slideText?,
   deckContext?,
   narrativeContext?,
-  confirmedClaim?
+  confirmedClaim?,     // argument slides
+  confirmedJob?        // non-argument: job only; or alongside claim
 })
 ```
 
@@ -163,11 +180,13 @@ Pending:
 ## Quick reference
 
 **Enrichment:** human ask #1 only (+ prior chat / `deckContext`). Connector search banned.
+Server requires `confirmedJob` and/or `confirmedClaim` on critique.
 
-**Human sees:** ask #1 (job/claim), then raw `critique` + ask #2 (build).
+**Human sees:** ask #1 (audience takeaway, in plain language), then raw `critique` + ask #2 (build).
 
 **Build echo:** pass the critique object through unchanged (ids must survive).
 
 **Deprecated:** `improve_slide_pptx`, `storyConfirmed`, assessment `confirm.*` / `planned_work` scaffolding.
 
 **Not this skill:** Google Workspace `slide_critique` apply/Sheets flows — different product.
+
