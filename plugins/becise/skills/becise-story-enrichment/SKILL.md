@@ -2,7 +2,7 @@
 name: becise-story-enrichment
 description: >
   Lock the story behind a slide with the human before critique/build, then always
-  get consent on the raw critique. Activate when slide_analyze returns, when
+  get consent on the raw critique. Activate when slide_revision_analyze returns, when
   slide_revision_critique is about to run or has just returned, when the user asks
   to improve or rebuild a slide, or when you would have used the deprecated
   improve_slide_pptx assessment/confirm flow.   Always ask what takeaway the audience should leave with before critique; never
@@ -30,15 +30,15 @@ You do **not** build slides yourself. After ask #1, critique, and ask #2 consent
 
 Typical path:
 
-1. `slide_analyze` has run (or is about to), **or**
+1. `slide_revision_analyze` has run (or is about to), **or**
 2. You’re preparing `slide_revision_critique`, **or**
 3. Critique just returned and you must present it / ask to build.
 
 ## Your job (in order)
 
-### 1. Read the analyze signal (story reading only)
+### 1. Read the analyze signal (job/claim reading only)
 
-From `slide_analyze` (when available), note — this is a **hypothesis**, not a critique:
+From `slide_revision_analyze` (when available), note — this is a **hypothesis**, not a critique:
 
 - `slide_job`, `core_claim`
 - `candidate_claims` — options when the claim is inferred/unclear
