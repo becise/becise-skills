@@ -33,9 +33,9 @@ the flow).
 
 ```
 1. Prepare slide inputs (image via get_upload_url when large)
-2. slide_analyze          ← job, claim, so_what, context_gaps
+2. slide_analyze          ← lean story reading (job/claim/so-what) — NOT a critique
 3. ASK #1                 ← “what should the audience take away?” (human language)
-4. slide_revision_critique  ← confirmedClaim and/or confirmedJob (server-required)
+4. slide_revision_critique  ← diagnoses against locked story (server-required confirmation)
 5. ASK #2                 ← show raw critique → ready to build?
 6. slide_revision_build     ← only after yes
 7. Handle outcome: headline_only | ready | blocked / pending
@@ -51,16 +51,21 @@ Need:
 - `slideImage`: prefer `{ mimeType, url }` from `get_upload_url` for large images; reuse the **same url** on later calls
 - Optional: `slideText`, `deckContext`
 
-### 2. `slide_analyze`
+### 2. `slide_analyze` (story reading only)
 
 Call `slide_analyze` with the slide image (and any known context).
 
-Use the result to frame ask #1:
+This is a **hypothesis for ask #1**, not a critique. Do **not** show it as the
+slide diagnosis — that comes later from `slide_revision_critique`.
 
-- `slide_job` / `core_claim` — what the slide is for / takeaway
+Use only:
+
+- `slide_job` / `core_claim` — estimated purpose / takeaway
 - `candidate_claims` — options when unclear/inferred
 - `context_gaps` — concrete questions for the **presenter** (not a search plan)
 - `so_what` / confidences
+
+There is no analyze critique paragraph, intervention hint, or chart inventory.
 
 Prior chat + supplied `deckContext` are fair game as passive context.
 
@@ -90,10 +95,11 @@ The server rejects critique if neither field is set (empty strings don’t count
 
 **Banned:** Drive / email / notes / briefs / PRD corpus search.
 
-### 4. `slide_revision_critique`
+### 4. `slide_revision_critique` (the diagnosis)
 
-Call with the same slide inputs plus enrichment from ask #1. At least one of
-`confirmedClaim` / `confirmedJob` is required:
+This is the only critique the human should see. It judges the slide against the
+locked takeaway / purpose from ask #1. At least one of `confirmedClaim` /
+`confirmedJob` is required:
 
 ```
 slide_revision_critique({

@@ -5,11 +5,9 @@ description: >
   get consent on the raw critique. Activate when slide_analyze returns, when
   slide_revision_critique is about to run or has just returned, when the user asks
   to improve or rebuild a slide, or when you would have used the deprecated
-  improve_slide_pptx assessment/confirm flow. Always ask what takeaway the
-  audience should leave with before critique (plain language — never jargon like
-  claim/job in chat); never search Drive, email, notes, or briefs for this path;
-  never skip the human ask after critique; never call slide_revision_build
-  without consent.
+  improve_slide_pptx assessment/confirm flow.   Always ask what takeaway the audience should leave with before critique; never
+  search Drive, email, notes, or briefs for this path; never skip the human ask
+  after critique; never call slide_revision_build without consent.
 ---
 
 # Story enrichment (slide-revision-v2)
@@ -38,14 +36,17 @@ Typical path:
 
 ## Your job (in order)
 
-### 1. Read the analyze signal
+### 1. Read the analyze signal (story reading only)
 
-From `slide_analyze` (when available), note:
+From `slide_analyze` (when available), note — this is a **hypothesis**, not a critique:
 
 - `slide_job`, `core_claim`
 - `candidate_claims` — options when the claim is inferred/unclear
 - `context_gaps` — concrete questions for the **presenter** (not a file-search plan)
 - `so_what` / confidences
+
+Do **not** present analyze output as the slide diagnosis. Critique comes only from
+`slide_revision_critique` after ask #1, and it judges the locked takeaway.
 
 Use prior conversation in this thread and any `deckContext` already supplied as passive framing. Do **not** open connector search tools.
 
@@ -74,6 +75,8 @@ Use analyze to frame a concrete guess when you can; fold gaps into the same ques
 The server requires one of those fields on critique (empty strings don’t count).
 
 ### 3. Call critique with enrichment
+
+Critique diagnoses against the locked story (not a fresh guess at the takeaway).
 
 ```
 slide_revision_critique({
