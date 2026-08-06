@@ -14,7 +14,7 @@ description: >
 
 You help Becise understand **why this slide exists** and **what takeaway the audience should leave with**, then make sure a human has seen the critique before any rebuild.
 
-You do **not** build slides yourself. After ask #1, critique, and ask #2 consent, call `slide_revision_build`. Exhibits, recommendations, tree, and Arranger run on the server.
+You do **not** build slides yourself. After ask #1, critique, and ask #2 consent, call `slide_revision_build`. The server runs recommendations first, then exhibits/tree/Arranger only when rebuilding.
 
 ## Do not
 
@@ -41,7 +41,7 @@ Typical path:
 From `slide_revision_analyze` (when available), note — this is a **hypothesis**, not a critique:
 
 - `slide_job`, `core_claim`
-- `candidate_claims` — options when the claim is inferred/unclear
+- `candidate_claims` — distinct takeaway sentences for ask #1 multiple choice (argument slides)
 - `context_gaps` — concrete questions for the **presenter** (not a file-search plan)
 - `so_what` / confidences
 - `next_step` — when present, obey it
@@ -57,29 +57,60 @@ polling a finished job. Do not silently wait as if critique were running.
 
 ### 2. Always ask #1 — what should the audience take away?
 
-Before critique, lock the takeaway with the human. Prefer plain language — never jargon like “claim,” “job,” “core_claim,” or “confirmedClaim” in the chat.
+Before critique, lock the takeaway with the human. Prefer plain language — never jargon like “claim,” “job,” “core_claim,” “auto-read,” or “confirmedClaim” in the chat.
 
 **Already answered in this thread?** Map their words to `confirmedClaim` /
 `confirmedJob` and call critique immediately — don’t re-ask or stall.
 
-Otherwise ask **one** natural question:
+Otherwise ask **one** short question, and when the client supports choices, use a **multiple-choice of takeaway guesses** — not process meta-options.
 
-For slides that argue a point, ask something like:
+#### Argument slides (multiple choice)
 
-- “What’s the key idea you want your audience to come away with after this slide?”
-- Or offer a reading and check it: “I’m reading this as: June’s IVR changes are working — 3 of 4 metrics improved. Is that what you want people to take away? And is 18% above target for your audience?”
+Lead with one plain question, e.g. “What should the audience walk away believing after this slide?”
 
-For slides that don’t argue (title, divider, agenda, thank-you), ask what the slide is *for*:
+Then list **2–4 distinct takeaway sentences** as the choices (each option *is* a guess at the claim), plus a final **Something else** option. Build the list from analyze:
+
+- Prefer `candidate_claims` when present (already distinct sentence guesses).
+- Always include `core_claim` if it isn’t already one of them.
+- If you only have one good reading, still show it as option 1 and invent at most one alternate grounded in the slide — don’t pad with fluff.
+- Last option: **Something else** (they type their own). That is the only non-claim choice.
+
+**Do not** use meta choices like “Use the auto-read,” “I’ll state it myself,” “Type something,” or “Lock in: …”. The choice text *is* the takeaway.
+
+Good:
+
+```
+What should the audience walk away believing after this slide?
+
+1. Staffing a dedicated renewals team will improve customer experience and maximize financial outcomes.
+2. Renewals work is fragmented today — a dedicated team closes that gap.
+3. This slide lists what a renewals team would own; it isn’t arguing to create one.
+4. Something else
+```
+
+Bad (avoid):
+
+```
+1. Use the auto-read claim
+2. It's just a job/scope slide
+3. I'll state it myself
+4. Type something.
+```
+
+If a gap matters (e.g. so-what), fold it into the question in one breath — don’t add a second quiz.
+
+#### Non-argument slides (`claim_confidence: not_applicable`)
+
+Ask what the slide is *for* (job), not a claim MC. Offer 1–2 short job readings if useful, plus Something else.
 
 - “Looks like this opens the Market Outlook section — is that right?”
 
-Use analyze to frame a concrete guess when you can; fold gaps into the same question. Collaborative, brief — don’t interrogate or accuse.
+#### After they answer (map privately — do not show field names)
 
-**After they answer** (map privately — do not show field names to the user):
-
-- **Argument slide, agreement** → echo the reading as `confirmedClaim` (optionally also `confirmedJob`)
-- **Argument slide, correction** → their takeaway sentence as `confirmedClaim`
-- **Non-argument** (`claim_confidence: not_applicable`) → set `confirmedJob` only; **omit** `confirmedClaim`
+- **Accept their answer as-is** — including topic labels. Do **not** run a “did you mean …?” reconfirm loop. Map and call critique; the server owns sentence-form headlines later.
+- **Picked a claim option** → that sentence is `confirmedClaim` (optionally also `confirmedJob`)
+- **Something else / typed answer** → their words as `confirmedClaim`
+- **Non-argument** → set `confirmedJob` only; **omit** `confirmedClaim`
 - Extra color they volunteer → `narrativeContext`
 
 The server requires one of those fields on critique (empty strings don’t count).
@@ -102,20 +133,21 @@ slide_revision_critique({
 
 Poll `get_result` if pending.
 
-Keep `charts[]` / `tables[]` for the build echo. Do **not** dump inventories into chat unless asked.
+Keep `charts[]` / `tables[]` / `editorial` for the build echo. Do **not** dump inventories or `editorial` into chat unless asked.
 
 ### 4. Always ask #2 — present the critique
 
 **Every time**, after critique:
 
-1. Show the raw `critique` string (light framing is fine: “Here’s my read:” — don’t rewrite the diagnosis).
-2. Ask **one** question: ready to rebuild? Invite optional reactions.
+1. Show the raw English `critique` string only (light framing is fine: “Here’s my read:” — don’t rewrite the diagnosis). Do **not** show `editorial` to the human.
+2. Ask **one** question: ready to rebuild? Invite optional reactions. If the critique reads as a clean bill of health, you may say so lightly before asking.
 
 Tone: collaborative, brief, concrete.
 
 Examples:
 
 - “Here’s my critique. Ready for me to rebuild the slide? Anything you’d change about the direction first?”
+- “This already lands the takeaway cleanly. Want me to run a build anyway, or leave it?”
 
 Collect optional **`critiqueFeedback`**. If they correct the takeaway, set `confirmedClaim` to their declarative sentence before build.
 
@@ -128,19 +160,20 @@ slide_revision_build({
   slideNumber,
   slideImage,              // same url
   slideText?,
-  critique: <echo critique result>,  // slide_job, core_claim, critique, charts, tables
+  critique: <echo critique result>,  // include editorial when present
   narrativeContext?,
   confirmedClaim?,
   critiqueFeedback?
 })
 ```
 
-Poll `get_result` (often 2–4 minutes with charts).
+Poll `get_result` (`no_change` / `headline_only` are fast; rebuild with charts often 2–4 minutes).
 
 ### 6. Handle build outcomes
 
 | `outcome` | What you do |
 |-----------|-------------|
+| `no_change` | Tell the human the slide already works; relay `recommendations.rationale`. Success. Stop. Do not retry without new human input. Override: call build again with `critiqueFeedback` if they insist. |
 | `headline_only` | Print `headline` in chat. Success. Stop. No PPTX. |
 | `ready` | Share PPTX `downloadUrl`; mention any `follow_up` notes. |
 | `blocked` | Explain `block_reason` / `error_stage`; don’t invent a Workspace workaround. |
@@ -151,7 +184,7 @@ Poll `get_result` (often 2–4 minutes with charts).
 |---------|--------|
 | Ask #1 audience takeaway (plain language; no connector search) | **This skill** |
 | Human sees raw critique + ask #2 | **This skill** |
-| Exhibits, recommend, tree, Arranger | Server (`slide_revision_build`) |
+| Recommend → (rebuild only) exhibits, tree, Arranger | Server (`slide_revision_build`) |
 
 **Passive context OK:** prior chat, supplied `deckContext`.
 
