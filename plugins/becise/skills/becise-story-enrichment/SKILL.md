@@ -24,7 +24,7 @@ You do **not** build slides yourself. After ask #1, critique, and ask #2 consent
 - Use Google Workspace apply / Sheets flows for this path.
 - Tell the user their slide is confusing or poorly made.
 - Invent chart or table numbers.
-- Skip ask #1 because the takeaway looks clear, so-what looks confident, or the user said “just fix it.”
+- Skip ask #1 because *you* think the takeaway looks clear, so-what looks confident, or the user said “just fix it.” (Their explicit takeaway already in this thread *does* count — lock it and critique.)
 
 ## When you activate
 
@@ -44,15 +44,25 @@ From `slide_analyze` (when available), note — this is a **hypothesis**, not a 
 - `candidate_claims` — options when the claim is inferred/unclear
 - `context_gaps` — concrete questions for the **presenter** (not a file-search plan)
 - `so_what` / confidences
+- `next_step` — when present, obey it
 
 Do **not** present analyze output as the slide diagnosis. Critique comes only from
 `slide_revision_critique` after ask #1, and it judges the locked takeaway.
 
 Use prior conversation in this thread and any `deckContext` already supplied as passive framing. Do **not** open connector search tools.
 
+**When analyze is `done`:** stop tools. Next visible message = ask #1 (unless the
+human already locked the takeaway in this thread — then call critique). Do not keep
+polling a finished job. Do not silently wait as if critique were running.
+
 ### 2. Always ask #1 — what should the audience take away?
 
-**Every time**, before critique, ask the human **one** natural question. Prefer plain language — never jargon like “claim,” “job,” “core_claim,” or “confirmedClaim” in the chat.
+Before critique, lock the takeaway with the human. Prefer plain language — never jargon like “claim,” “job,” “core_claim,” or “confirmedClaim” in the chat.
+
+**Already answered in this thread?** Map their words to `confirmedClaim` /
+`confirmedJob` and call critique immediately — don’t re-ask or stall.
+
+Otherwise ask **one** natural question:
 
 For slides that argue a point, ask something like:
 

@@ -27,7 +27,7 @@ the flow).
 - Do **not** search Google Drive, email, meeting notes, briefs, or other connected file systems to enrich the story.
 - Do **not** use Google Workspace / Slides apply flows for this product path.
 - Do **not** invent chart or table numbers.
-- Do **not** skip ask #1 because the takeaway looks clear or the user said “just fix it.”
+- Do **not** skip ask #1 because *you* think the takeaway looks clear or the user said “just fix it.” (If they already *stated* the takeaway in this thread, that counts as ask #1 — proceed to critique.)
 
 ## Mandatory sequence
 
@@ -64,15 +64,30 @@ Use only:
 - `candidate_claims` — options when unclear/inferred
 - `context_gaps` — concrete questions for the **presenter** (not a search plan)
 - `so_what` / confidences
+- `next_step` — when present, obey it (hard stop → ask #1)
 
 There is no analyze critique paragraph, intervention hint, or chart inventory.
 
 Prior chat + supplied `deckContext` are fair game as passive context.
 
+**When analyze returns `state: "done"`:** stop all tools in that turn. Your next
+visible message must be ask #1 (or critique — only if the human already locked the
+takeaway in this thread). Do **not** keep polling `get_result` for a finished job.
+Do **not** silently wait for critique — critique has not started yet.
+
+If analyze returns `pending`, poll `get_result` until done, then ask #1 immediately.
+
 ### 3. Always ask #1 (before critique)
 
-**Always** ask the human one natural question before critique. Prefer plain language —
+**Always** get a human-locked takeaway before critique. Prefer plain language —
 never say “claim,” “job,” or tool field names in the chat.
+
+**If they already stated the takeaway** earlier in this thread (e.g. “argue that
+retention held”), treat that as ask #1 answered: map to `confirmedClaim` /
+`confirmedJob` and call `slide_revision_critique` immediately — do not ask again
+and do not stall.
+
+Otherwise ask one natural question:
 
 For argument slides, something like:
 
@@ -196,3 +211,10 @@ Server requires `confirmedJob` and/or `confirmedClaim` on critique.
 
 **Not this skill:** Google Workspace `slide_critique` apply/Sheets flows — different product.
 
+---
+
+## Install note (becise-skills repo)
+
+Suggested path: `plugins/becise/skills/becise-slide-revision-v2/SKILL.md`
+
+In the same commit, MAJOR-bump `plugins/becise/.claude-plugin/plugin.json` and update the plugin description to mention slide-revision-v2. Align `becise-story-enrichment` with this human-ask sequence (no Drive/email search).

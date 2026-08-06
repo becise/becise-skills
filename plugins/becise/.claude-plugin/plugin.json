@@ -1,5 +1,5 @@
 {
   "name": "becise",
-  "description": "Rebuild any chart from any source via the Becise MCP; place into Slides/Docs or export PNG. slide-revision-v2: lean slide_analyze (job/claim/so-what only) \u2192 ask audience takeaway in plain language \u2192 slide_revision_critique against locked story \u2192 consent \u2192 slide_revision_build. Bundles becise-chart, becise-place, becise-story-enrichment, becise-slide-revision-v2.",
-  "version": "6.0.0"
+  "description": "Rebuild any chart from any source via the Becise MCP; place into Slides/Docs or export PNG. slide-revision-v2: lean slide_analyze (job/claim/so-what only) → ask audience takeaway in plain language → slide_revision_critique against locked story → consent → slide_revision_build. Bundles becise-chart, becise-place, becise-story-enrichment, becise-slide-revision-v2.",
+  "version": "6.1.0"
 }
