@@ -8,7 +8,7 @@
     {
       "name": "becise",
       "source": "./plugins/becise",
-      "description": "Rebuild any chart from any source (slide, PDF, dashboard, screenshot) via the Becise MCP, show it live, and place it into Slides/Docs or export as PNG."
+      "description": "Rebuild charts via Becise MCP, place into Slides/Docs or PNG, and orchestrate slide-revision-v2 (human job/claim ask, critique consent, then build)."
     }
   ]
 }

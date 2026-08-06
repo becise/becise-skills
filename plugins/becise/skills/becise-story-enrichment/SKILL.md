@@ -1,36 +1,38 @@
 ---
 name: becise-story-enrichment
 description: >
-  Enrich the story behind a slide before critique/build, then always get human
-  consent on the raw critique. Activate when slide_analyze returns (especially
-  with context_gaps / uncertain so_what), when slide_revision:critique is
-  about to run or has just returned, when the user asks to improve or rebuild
-  a slide, or when you would have used the deprecated improve_slide_pptx
-  assessment/confirm flow. Search Drive, email, notes, briefs, and prior chat
-  for why the slide exists and what takeaway the audience should leave with;
-  never skip the human ask; never call slide_revision:build without consent.
+  Lock the story behind a slide with the human before critique/build, then always
+  get consent on the raw critique. Activate when slide_analyze returns, when
+  slide_revision_critique is about to run or has just returned, when the user asks
+  to improve or rebuild a slide, or when you would have used the deprecated
+  improve_slide_pptx assessment/confirm flow. Always ask one targeted job/claim
+  question before critique; never search Drive, email, notes, or briefs for this
+  path; never skip the human ask after critique; never call slide_revision_build
+  without consent.
 ---
 
 # Story enrichment (slide-revision-v2)
 
 You help Becise understand **why this slide exists** and **what takeaway the audience should leave with**, then make sure a human has seen the critique before any rebuild.
 
-You do **not** build slides yourself. After enrichment and consent, call `slide_revision:build`. Exhibits, recommendations, tree, and Arranger run on the server.
+You do **not** build slides yourself. After ask #1, critique, and ask #2 consent, call `slide_revision_build`. Exhibits, recommendations, tree, and Arranger run on the server.
 
 ## Do not
 
 - Call `improve_slide_pptx` (deprecated — no `storyConfirmed` / assessment envelopes).
-- Call `slide_revision:build` before the human has seen the raw critique and agreed.
+- Call `slide_revision_build` before the human has seen the raw critique and agreed.
+- Search Google Drive, email, meeting notes, briefs, or other connected file systems to enrich the story.
 - Use Google Workspace apply / Sheets flows for this path.
 - Tell the user their slide is confusing or poorly made.
 - Invent chart or table numbers.
+- Skip ask #1 because the claim looks clear, so-what looks confident, or the user said “just fix it.”
 
 ## When you activate
 
 Typical path:
 
 1. `slide_analyze` has run (or is about to), **or**
-2. You’re preparing `slide_revision:critique`, **or**
+2. You’re preparing `slide_revision_critique`, **or**
 3. Critique just returned and you must present it / ask to build.
 
 ## Your job (in order)
@@ -40,39 +42,39 @@ Typical path:
 From `slide_analyze` (when available), note:
 
 - `slide_job`, `core_claim`
-- `context_gaps` — concrete questions to search
-- `so_what` / `so_what_confidence` / claim confidence
+- `candidate_claims` — options when the claim is inferred/unclear
+- `context_gaps` — concrete questions for the **presenter** (not a file-search plan)
+- `so_what` / confidences
 
-Treat gaps as a **search plan**, not as a reason to skip work. Enrichment is always worth attempting; it never replaces the later human ask.
+Use prior conversation in this thread and any `deckContext` already supplied as passive framing. Do **not** open connector search tools.
 
-### 2. Always search connected resources
+### 2. Always ask #1 — lock job / claim
 
-Before critique (or before asking the human, if critique already ran without enrichment), search:
+**Every time**, before critique, ask **one** targeted question that ascertains:
 
-- Drive / docs / decks
-- Email
-- Meeting notes
-- Briefs / PRDs
-- Prior conversation in this thread
-- Any `deckContext` already supplied
+- What the slide is **for** (job)
+- What takeaway the audience should leave with (**claim**), when the slide argues
 
-Focus on:
+Frame a concrete reading from analyze. Fold gaps and candidate claims into the **same** question — do not interrogate.
 
-- Why this slide is in the presentation
-- What decision, risk, or action the audience should take away
-- Targets, benchmarks, audience, or prior claims that ground the so-what
+Tone: collaborative, brief, concrete. Offer a reading; don’t accuse.
 
-Synthesize into:
+Examples:
 
-- **`narrativeContext`** — short paragraph of what you found (grounded; no invented facts)
-- **`confirmedClaim`** — one declarative insight sentence when the slide argues; **omit** for non-argument slides (title, divider, agenda, credit, mood) where there is no claim
+- “I’m reading this as arguing that June’s IVR changes are working — 3 of 4 metrics improved. Is that the takeaway, and is 18% above target for your audience?”
+- For a divider: “Looks like this opens the Market Outlook section — right?”
 
-If search finds nothing useful, proceed anyway with whatever you have. Still always ask the human after critique.
+Map the answer:
+
+- **Argument slide, agreement** → echo the reading as `confirmedClaim`
+- **Argument slide, correction** → their declarative insight sentence as `confirmedClaim`
+- **Non-argument** (`claim_confidence: not_applicable`) → confirm job only; **omit** `confirmedClaim`
+- Extra color they volunteer → `narrativeContext`
 
 ### 3. Call critique with enrichment
 
 ```
-slide_revision:critique({
+slide_revision_critique({
   slideNumber,
   slideImage,           // prefer get_upload_url; reuse the same url later
   slideText?,
@@ -86,14 +88,14 @@ Poll `get_result` if pending.
 
 Keep `charts[]` / `tables[]` for the build echo. Do **not** dump inventories into chat unless asked.
 
-### 4. Always present the critique and ask once
+### 4. Always ask #2 — present the critique
 
 **Every time**, after critique:
 
 1. Show the raw `critique` string (light framing is fine: “Here’s my read:” — don’t rewrite the diagnosis).
 2. Ask **one** question: ready to rebuild? Invite optional reactions.
 
-Tone: collaborative, brief, concrete. Offer a reading; don’t interrogate.
+Tone: collaborative, brief, concrete.
 
 Examples:
 
@@ -106,7 +108,7 @@ Collect optional **`critiqueFeedback`**. If they correct the takeaway, set `conf
 ### 5. On consent → build
 
 ```
-slide_revision:build({
+slide_revision_build({
   slideNumber,
   slideImage,              // same url
   slideText?,
@@ -131,9 +133,13 @@ Poll `get_result` (often 2–4 minutes with charts).
 
 | Concern | Owner |
 |---------|--------|
-| Drive / email / notes search | **This skill** |
-| Human sees raw critique + consent | **This skill** |
-| Exhibits, recommend, tree, Arranger | Server (`slide_revision:build`) |
+| Ask #1 job/claim (no connector search) | **This skill** |
+| Human sees raw critique + ask #2 | **This skill** |
+| Exhibits, recommend, tree, Arranger | Server (`slide_revision_build`) |
+
+**Passive context OK:** prior chat, supplied `deckContext`.
+
+**Banned for enrichment:** Drive, email, notes, briefs, PRDs, other corpus search.
 
 **Deprecated:** `improve_slide_pptx`, `storyConfirmed`, `stage: assessment`, `confirm.*`, `planned_work` as required UI.
 
