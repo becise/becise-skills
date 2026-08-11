@@ -1,5 +1,5 @@
 {
   "name": "becise",
   "description": "Rebuild any chart from any source via the Becise MCP; place into Slides/Docs or export the chart as a PNG. Analyze any slide to improve its story and design.",
-  "version": "6.1.1"
+  "version": "7.0.0"
 }

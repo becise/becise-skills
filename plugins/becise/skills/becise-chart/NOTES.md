@@ -92,8 +92,9 @@ that was already proven fast and accurate in production.
 
 Context is **text, not pixels**, by design: you have seen the full view; a sentence of surrounding
 copy tells the decider what it needs at a fraction of the cost, and `context.image` is reserved in
-the schema for a future server version. The legacy `chart_critique` fallback in Step 2 exists for
-version skew only — drop it once every deployed server has `rebuild_chart`.
+the schema for a future server version. The legacy `chart_critique` fallback (now in
+`becise-chart-emphasis`'s Step 1/3, since this skill no longer calls `rebuild_chart` itself) exists
+for version skew only — drop it once every deployed server has `rebuild_chart`.
 
 ## The HTML no longer passes through you (URL mode)
 
@@ -120,7 +121,10 @@ Sandbox note: in the Claude harness, Node's `fetch` ignores the `HTTP(S)_PROXY` 
 provides (curl honors it) — the bundler falls back to `curl` on any fetch throw, and its terminal
 error names `NODE_USE_ENV_PROXY=1` (Node ≥ 24) when a proxy env is present.
 
-## Why Step 4 verifies visually
+## Why the show step verifies visually
+
+(Now `becise-chart-emphasis`'s Step 5 — this skill no longer shows anything itself, but the finding
+below is why that step exists.)
 
 2026-07-31, slide-3 waterfall: the server emitted syntactically flawless code whose data points
 used the vertical-bar convention under a horizontal `indexAxis` — every value parsed NaN, the chart
