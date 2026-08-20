@@ -16,15 +16,15 @@ Orchestration only. **No Becise IP lives here** — analysis happens server-side
 `chart_assess` / `rebuild_chart` MCP tools, which this skill does not call.
 
 ```
-INGEST ──► CROP ──► host each crop ──► hand off to becise-chart-emphasis
-pixels     one     get_upload_url        (assess → ask → rebuild → bundle → SHOW)
-per view   chart    per chart
-           each
+INGEST ──► GROUP ──► CROP ──► host each crop ──► hand off to becise-chart-emphasis
+pixels     into      one      get_upload_url        (assess → ask → rebuild → bundle → SHOW)
+per view   families  per      per family
+                     family
 ```
 
 **This skill's job ends at the handoff.** It never calls `chart_assess` or `rebuild_chart`, never
 bundles, never shows a chart. `becise-chart-emphasis` owns everything from there — continue directly
-into it for every kept chart; do not stop and wait for further instructions.
+into it for every kept family; do not stop and wait for further instructions.
 
 Background and rationale live in `NOTES.md` next to this file. Read it when something surprises you.
 
@@ -40,7 +40,7 @@ The bundler scripts (`make-bundle.mjs`, `bundle-from-critique.mjs`) live in this
 but are used by `becise-chart-emphasis`, not by this skill — bundling happens after the rebuild,
 which doesn't exist yet at this point in the flow.
 
-## Step 0 — Find the charts
+## Step 0 — Find the chart families
 
 Break the source into views (slides, PDF pages, dashboard panels, one screenshot), get pixels for
 each (Step 1), and **look at every one yourself**.
@@ -51,9 +51,34 @@ plotted data geometry. **Colored-cell tables count** (heatmaps).
 isotype/pictographs, logos, photos. A concept diagram drawn to look chart-like (a funnel of shapes)
 isn't chartable — note it rather than forcing it.
 
-Record per kept chart: its view, where it sits (you'll crop it in Step 1), and a **`chart_id`
-unique across the whole job**, view-prefixed: `slide3_chart1`, `page9_chart1`. Two views that each
-start at `chart1` collide when merged, and the bundler (in `becise-chart-emphasis`) refuses
+**The unit of work is a *family*, not a drawn chart.** A view often draws ONE dataset as several
+visually separate charts, and cropping those apart destroys the comparison the slide exists to make.
+Group them:
+
+- **Same measure, same categories, drawn more than once** — the panels differ only in which *slice*
+  they show (a period, a scenario, a source). Four donuts for July/Accumulated × Previous/Current
+  Year is **one family**, not four charts.
+- **A chart plus its own data table** — a table restating the same categories and values the chart
+  draws is that chart's data layer, not a separate exhibit. One family. This matters most when the
+  chart carries no data labels (an unlabelled pie next to a value table): crop them apart and the
+  numbers are gone for good.
+- **Panels sharing one legend, or sitting inside one row/column header grid** — the shared
+  scaffolding is what names each panel. One family, and the crop must include that scaffolding.
+
+**Split into separate families only on a genuine difference in measure** — different metrics,
+populations, denominators, or time bases. Matching units and a matching axis are NOT evidence of one
+dataset: two adjacent quarterly charts both labelled "% Change" are two families when one tracks a
+guest-count gap and the other an average-check gap.
+
+You do not have to get this perfectly right. The server makes the same call from the actual extracted
+data and reports back when it disagrees — see `additional_datasets_detected` in
+`becise-chart-emphasis`. **When genuinely unsure, group rather than split:** an over-grouped crop
+comes back with a clear signal you can act on, while an over-split crop silently loses the
+comparison and nothing downstream can tell.
+
+Record per kept **family**: its view, where it sits (you'll crop it as ONE region in Step 1), and a
+**`chart_id` unique across the whole job**, view-prefixed: `slide3_chart1`, `page9_chart1`. Two views
+that each start at `chart1` collide when merged, and the bundler (in `becise-chart-emphasis`) refuses
 duplicates.
 
 **Big sources:** triage cheap metadata first (Slides `get_presentation` text, a PDF's extracted
@@ -61,12 +86,18 @@ text) to drop title/text/table pages, then eyeball only candidates; montage many
 contact sheet rather than reading each. **If the user named the view** ("the chart on slide 5"),
 skip triage entirely and go straight to that one. **If nothing is chartable, stop** and say so.
 
-## Step 1 — Ingest and CROP: one tight image per chart
+## Step 1 — Ingest and CROP: one image per family
 
 Both `chart_assess` and `rebuild_chart` (called by `becise-chart-emphasis`, not here) take **the
-chart, not the page around it**. A tight crop is faster, more accurate, and far less likely to trip
-upstream image filters than a full slide (a busy full-slide image has been observed tripping a
-provider content filter that the same chart's clean crop sailed through).
+chart family, not the page around it**. A crop scoped to the family is faster, more accurate, and far
+less likely to trip upstream image filters than a full slide (a busy full-slide image has been
+observed tripping a provider content filter that the same chart's clean crop sailed through).
+
+**Tight means "excludes the page", not "excludes the family's own parts."** Crop to the whole region
+the family occupies — every panel in it, plus everything between and around those panels that the
+reader needs in order to decode a mark. Cutting a legend, a panel header, or a companion value table
+out of frame is the single most damaging thing you can do here, because the server cannot recover
+what was never in the image.
 
 First get full-view pixels:
 
@@ -81,7 +112,7 @@ First get full-view pixels:
 **From Google Drive:** `get_drive_file_download_url` → `curl` it to disk (HTTP mode returns a temp
 URL, not a path; a huge file may return base64-in-JSON → `jq -r .content | base64 -d`).
 
-**Then crop each chart out of its view:**
+**Then crop each family out of its view:**
 
 - **PDF-rendered views:** PyMuPDF `clip` renders the crop directly at high scale —
   `python3 -c "import fitz; d=fitz.open('in.pdf'); d[3].get_pixmap(matrix=fitz.Matrix(4,4), clip=fitz.Rect(x0,y0,x1,y1)).save('crop.png')"`
@@ -89,12 +120,36 @@ URL, not a path; a huge file may return base64-in-JSON → `jq -r .content | bas
 - **Raw images (thumbnails, screenshots):** PIL —
   `python3 -c "from PIL import Image; Image.open('view.png').crop((x0,y0,x1,y1)).save('crop.png')"`
   (`fitz` can also open plain images if PIL is missing).
-- Include the chart's **title, axis labels, legend, and data labels**, plus a small margin. Exclude
-  everything else — neighboring panels, page headers, decorative side content.
+
+**Must be INSIDE the crop** — anything needed to decode a value or name a panel:
+
+- chart title, plus any parenthetical qualifier (units, currency basis, "inflation adjusted 2022 $",
+  period coverage, "excludes X")
+- axis titles, tick labels, data labels
+- **the legend** — including one placed outside the plot, and including one shared by several panels
+- on-plot annotations carrying meaning: bracket labels, callouts, sign conventions, reference lines
+- **a companion data table** restating the chart's own categories and values
+- footnote / source / "n =" line directly beneath
+- for a panel grid: **the row and column headers that name each panel**
+- totals printed above or beside the marks — these are often separate text boxes rather than part of
+  the chart object, and they are real data the server needs
+
+**Must be OUTSIDE the crop:** page headers/footers, page numbers, copyright and confidentiality
+lines, corner logos, decorative dividers, an unrelated pull-quote parked beside the chart, and
+anything belonging to a *different* family.
+
+**Story text is captured as text, not pixels.** An explanatory sentence under the chart, or the slide
+headline, goes into `context.text` at handoff (Step 2) rather than into the crop — it feeds the
+takeaway without competing with the marks for resolution. Including it costs little when it sits in
+the family's own column; it is not a substitute for passing it along as text.
+
+Add a small margin on every side — descenders, tick labels, and the outer stroke of a legend swatch
+routinely sit a pixel or two beyond where you'd draw the box. Extra whitespace inside a crop is
+inert, so err generous.
 
 **Verify every crop by LOOKING at it** before upload: every label/legend/axis readable, no data
-marks cut off, nothing foreign in frame. Clipped labels → widen and re-crop. This check is
-mandatory — a bad crop wastes a whole server round-trip in the next skill.
+marks cut off, every panel of the family present, nothing foreign in frame. Clipped labels → widen
+and re-crop. This check is mandatory — a bad crop wastes a whole server round-trip in the next skill.
 
 **Local `.pptx` — flat-image check FIRST (seconds, no conversion).** A `.pptx` is a zip:
 `unzip -o -d <dir> deck.pptx 'ppt/slides/*' 'ppt/media/*'`. Open `ppt/slides/slide<N>.xml`. If it
@@ -190,7 +245,11 @@ why each of those rules exists lives in `NOTES.md`.
 
 - **No hand-authored chart code, ever.** This skill never calls a rebuild tool and never renders a
   chart itself — that is entirely `becise-chart-emphasis`'s job.
-- No full-view screenshots as a substitute for a real crop.
+- No full-view screenshots as a substitute for a real crop — but a crop that spans several panels of
+  ONE family is a real crop, not a full-view screenshot. The test is whether everything in frame
+  belongs to the family, not how many chart-looking shapes it contains.
+- Never crop a family's panels apart to "keep it tight". Splitting one dataset into several crops
+  loses the comparison silently; grouping too much comes back as a fixable signal.
 - Translate script errors into plain language for the user; don't paste raw stack output.
 - **After editing any `.mjs` here, run `node <SKILL_DIR>/selftest.mjs`** (no network, Chrome, or
   MCP). It covers the silent-failure modes: id collision, quote-blind inlining, all-fallback,

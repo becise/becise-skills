@@ -33,6 +33,39 @@ chart after a tighter-crop retry, where the later result should win. It keeps th
 it in `manifest.warnings`. Auto-namespacing by call index was rejected: it silently changes ids the
 caller chose, and `c0_chart1` carries less meaning than `slide3_chart1`.
 
+## Why the crop is a *family*, not a drawn chart
+
+Cropping per drawn chart was the original rule, and it loses data in ways nothing downstream can
+recover. Three failure shapes, all observed:
+
+- **Four donuts, one dataset.** A revenue-by-channel slide drew the same 7 channels four times
+  (July / Accumulated × Previous / Current Year). The words naming those four panels — row labels down
+  the left edge, column headers across the top — sit *outside* every individual donut's box. Four
+  tight crops produce four charts that no longer know which period they are, and the comparison the
+  slide existed to make is gone for good; the labels were never in any image.
+- **A pie with no data labels, above its own value table.** Every number lived in the table; the pie
+  carried only wedges. Cropped apart, the pie extracts as almost entirely guessed values, trips the
+  server's >25%-guess provenance gate, and drops out as an image fallback — the chart silently isn't
+  rebuilt at all. Cropped together, every value is exact.
+- **Totals as separate text boxes.** Column totals printed above stacked bars are frequently their own
+  text boxes rather than part of the chart object. They read as decoration and get cropped out. They
+  are real data, and server-side their presence changes which chart type gets selected.
+
+So the rule inverted: **group by default, split only on a genuine difference in measure.** The
+asymmetry is the whole argument — an over-grouped crop comes back with
+`additional_datasets_detected`, a signal you can act on; an over-split crop fails silently and looks
+like success. When unsure, group.
+
+The case that must still split is the tempting one: two adjacent charts, same unit, same axis,
+different measures (a guest-count gap beside an average-check gap, both "% Change" across the same
+quarters). Matching units and a matching axis are not evidence of one dataset — the *measure* is.
+That shape is why the split rule is keyed on measure rather than on anything easier to detect.
+
+**The server is the check, not you.** It re-decides grouping from the extracted data — strings and
+numbers rather than pixels — and reports disagreement instead of guessing. That is why Step 0 says to
+use judgment and move on rather than agonizing: approximately right is enough, because the expensive
+direction of error is the one the server catches.
+
 ## Media extraction from a `.pptx`: only when the slide IS the picture
 
 A `.pptx` is a zip, and the chart on a slide is often just an image sitting in `ppt/media/`.

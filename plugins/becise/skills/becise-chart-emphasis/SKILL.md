@@ -69,6 +69,19 @@ under a minute. On `done`, you get `candidate_claims` (2–3 takeaway sentences)
 **Multi-chart job:** run assess and ask #1 separately for each chart — never batch several charts'
 takeaways into one combined question.
 
+**`additional_datasets_detected` on the result** — the server extracted the image and found more than
+one *unrelated* dataset in it (different measures, not more panels of one dataset), and assessed only
+the first. The candidates you received describe that first dataset alone. This is a signal that the
+crop spanned two genuinely separate charts — not an error, and not something to retry:
+
+- Go back to the view, crop the other chart as its own family, host it, and run assess for it too —
+  then ask #1 separately per chart, as above.
+- Do NOT put the extra datasets to the human using the candidates you have; those candidates do not
+  describe them.
+- If re-cropping isn't possible (the source is no longer available), say plainly that the image held
+  more than one chart and only the first was handled. Never quietly ship one chart as if it were all
+  of them.
+
 **If `chart_assess` is not in the tool listing** (older server), fall back to the legacy flow: call
 `rebuild_chart` directly with the human's stated takeaway as `context.story` (soft framing, not the
 locked emphasis contract), then bundle and SHOW without an emphasis ask.
@@ -138,6 +151,14 @@ Which one do you mean — <label 1>, <label 2>, or <label 3>?
 Then re-call `rebuild_chart` with the **same** `confirmedInsight` plus `emphasisClarification: <their
 answer>`. Whatever comes back next (`applied` or `none`), stop asking — never a second clarification
 round for the same chart.
+
+**`additional_datasets_detected` (can accompany any of the three outcomes)** — the crop held more than
+one unrelated chart and only the first was rebuilt. Do NOT re-run this chart: the one you got back is
+correct and complete for its own dataset, and this does not count against the retry cap. Instead,
+finish this chart normally (bundle it), then crop the other chart as its own family and run this skill
+from Step 1 for it — it needs its own assess and its own ask, since a takeaway locked for one dataset
+says nothing about another. Tell the human the source held more than one chart and that you're
+handling them separately; never present the first as though it were the whole picture.
 
 **Retry cap (failures, not clarification):** at most ONE re-run per chart for an actual failure —
 `isFallback: true`, a content-filter reason, or an empty/broken payload. The clarification round
