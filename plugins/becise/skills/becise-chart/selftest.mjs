@@ -15,7 +15,7 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { execFileSync, spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { scriptSyntaxErrors } from './make-bundle.mjs';
+import { scriptSyntaxErrors, extractTitle } from './make-bundle.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const MAKE = join(HERE, 'make-bundle.mjs');
@@ -278,6 +278,45 @@ check('placeholder metadata is nulled; title falls back to the real <h1>', () =>
   assert(m.charts[0].title === 'Fallback Heading', `title should fall back to the <h1>, got: ${m.charts[0].title}`);
   assert(m.charts[0].key_insight === null, `placeholder key_insight should be null, got: ${m.charts[0].key_insight}`);
   assert(m.charts[0].emptyPayload === false, 'placeholder metadata alone is not an empty payload');
+});
+
+// 7b. After the stitched title block, h1.chart-title is the finding. manifest.title must
+//     stay the operation (eyebrow), not that sentence.
+check('extractTitle prefers .chart-eyebrow over h1.chart-title', () => {
+  assert(extractTitle('<p class="chart-eyebrow">Sales Channel · Revenue Share</p><h1 class="chart-title">Telephone took the mix</h1>')
+    === 'Sales Channel · Revenue Share');
+  assert(extractTitle('<h1 class="chart-title">Only Heading</h1>') === 'Only Heading');
+});
+
+check('placeholder metadata falls back to eyebrow then h1', () => {
+  const raw = dir('ph2.raw.html');
+  const html = chartHtml({ title: 'Should Not Win' })
+    .replace(/"chart_title":"[^"]*"/, '"chart_title":"<chart_title>"')
+    .replace('<h1 class="chart-title">Should Not Win</h1>',
+      '<p class="chart-eyebrow">Operation Title</p><h1 class="chart-title">Finding sentence</h1>');
+  writeFileSync(raw, html);
+  const m = run(MAKE, { outDir: dir('ph2'), charts: [{ chart_id: 'ph2', rawHtmlPath: raw }] });
+  assert(m.charts[0].title === 'Operation Title', `title should be eyebrow, got: ${m.charts[0].title}`);
+});
+
+check('gallery omits .insight when the chart already has .chart-eyebrow', () => {
+  const gallery = join(HERE, '..', 'becise-place', 'build-gallery.mjs');
+  if (!existsSync(gallery)) return;
+  const raw = dir('g2.raw.html');
+  const html = chartHtml({ title: 'Op' })
+    .replace('<h1 class="chart-title">Op</h1>',
+      '<p class="chart-eyebrow">Op</p><h1 class="chart-title">Finding already on the chart</h1>');
+  writeFileSync(raw, html);
+  const outDir = dir('g2');
+  run(MAKE, { outDir, charts: [{ chart_id: 'g2', rawHtmlPath: raw }] });
+  const out = join(outDir, 'gallery.html');
+  execFileSync(process.execPath, [gallery], {
+    input: JSON.stringify({ dir: outDir, out, title: 'G' }),
+    encoding: 'utf8',
+    maxBuffer: 64e6
+  });
+  const g = readFileSync(out, 'utf8');
+  assert(!/<p class="insight">/.test(g), 'gallery must not duplicate key_insight above a stitched title block');
 });
 
 // 8. The transforms themselves must not corrupt scripts (a vendor bump reintroducing a literal

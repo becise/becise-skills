@@ -56,9 +56,14 @@ datalabels plugin, and the Inter font from CDNs. It renders in a networked brows
 CSP or offline. `make-bundle.mjs` inlines those deps into `web.html`, which is the only form safe to
 render, iframe, or host. `artifact.html` is the same content as a body fragment.
 
-Charts are **fluid** (`maintainAspectRatio:false`, `100vw/100vh`, transparent background), so output
-size is a render-time choice, not a property of the chart. That's why `render-png.mjs` takes explicit
+Charts are **fluid** (`maintainAspectRatio:false`, `100vw/100vh` on the page). `.chart-shell` may
+paint an opaque surface even when the page background is transparent. Output size is still a
+render-time choice, not a property of the chart — that's why `render-png.mjs` takes explicit
 `width`/`height` and why the gallery sets per-chart frame heights.
+
+When a chart's markup already includes `.chart-eyebrow`, `build-gallery.mjs` does **not** print
+`key_insight` again above the mount (the finding is inside the chart). Older HTML without an
+eyebrow still gets the gallery caption.
 
 ## `render-png.mjs`
 

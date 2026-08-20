@@ -119,12 +119,17 @@ function main(input) {
     // One IIFE per chart: the fragment's script blocks share top-level helpers, so they are scoped
     // TOGETHER, never per-block. No 'use strict' — emitted chart code has been observed to assign
     // undeclared globals (sloppy-mode legal); strict mode would throw and blank the chart.
+    // Charts that already stitch .chart-eyebrow (operation) + headline (finding)
+    // must not also print key_insight above the mount — that duplicates the
+    // finding. Older HTML has no eyebrow; keep the gallery caption.
+    const chartHasTitleBlock = /class=["'][^"']*chart-eyebrow/.test(mounted);
+
     return `<article class="card">
   <div class="card-head">
     <div class="titles"><p class="eyebrow">${escText(c.chart_id)}</p><h2>${escText(c.title || c.chart_id)}</h2></div>
     <span class="chip">${escText(c.chart_type || '?')}</span>
   </div>
-  ${c.key_insight ? `<p class="insight">${escText(c.key_insight)}</p>` : ''}
+  ${(!chartHasTitleBlock && c.key_insight) ? `<p class="insight">${escText(c.key_insight)}</p>` : ''}
   <div class="frame becise-embed" style="height:${h}px">
 ${mounted}
   </div>

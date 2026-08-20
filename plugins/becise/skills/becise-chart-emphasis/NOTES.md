@@ -47,11 +47,19 @@ than the extraction-only assess call. Offering option 4 unconditionally costs no
 wrong answer (they just don't pick it) and avoids a state where the only way to say "no, they're all
 roughly equal" is to overload "Something else."
 
-## Assess and rebuild both extract — that's accepted, not a bug to route around
+## Assess and rebuild used to both extract independently — fixed by echoing `assessedData`
 
-`chart_assess` runs its own Call 1 (extraction); `rebuild_chart` runs its own Call 1 again later. No
-echo of assess's canonical data passes between them. This means a locked takeaway chosen from
-assess's reading could, in principle, fail to resolve against rebuild's independent re-extraction if
-the two disagree on a label's exact spelling — that shows up as an unexpected
-`needs_clarification`, not a bug in this skill. If it happens often on real decks, that's server-side
-signal to consider echoing canonical data between the two calls; nothing to fix client-side.
+This used to be accepted as a known gap: `chart_assess` ran its own Call 1 (extraction); `rebuild_chart`
+ran its own Call 1 again later, with no echo of assess's canonical data between them. A locked
+takeaway chosen from assess's reading could disagree with rebuild's independent re-extraction —
+mismatched label spellings, or a genuine mis-segmentation Call 1 got right once and wrong the second
+time. It was live: on `chart1` (Revenue by Channel), assess correctly read one 4-series dataset while
+a same-image rebuild split it into two — the human was asked about the correct reading and got a
+chart built from the wrong one.
+
+Fixed server-side (plans/2026-08-20_slice-remerge-and-sandwich-tick-craft.md, S6): `chart_assess`'s
+result now carries an opaque `assessedData` field — its own canonical extraction. Step 3 echoes it
+back as `rebuild_chart`'s `assessedData` parameter, which skips rebuild's own Call 1 entirely. Assess
+and rebuild can no longer disagree, because there is only ever one extraction. Treat `assessedData`
+as opaque — never read or reconstruct it, just pass it through — and only fall back to a fresh
+`chartImage` re-crop when it's unavailable (older server, or the legacy no-`chart_assess` flow).

@@ -17,9 +17,9 @@ and rendering all happen server-side behind the `chart_assess` / `rebuild_chart`
 
 ```
 becise-chart hands off ──► chart_assess ──► ask #1 ──► rebuild_chart ──► bundle ──► SHOW ──► (place)
-{chart_id, crop url}       candidates      multiple    confirmedInsight   merged     Artifact  becise-place
-per chart                  (no HTML)       choice      (+ optional        bundle
-                                                         clarification)
+{chart_id, crop url}       candidates +     multiple    assessedData       merged     Artifact  becise-place
+per chart                  assessedData     choice      (echoed back,      bundle
+                            (no HTML)                    no re-extraction)
 ```
 
 **Always ask, per chart, even if the user already said the takeaway.** No draft chart is ever
@@ -69,18 +69,42 @@ under a minute. On `done`, you get `candidate_claims` (2–3 takeaway sentences)
 **Multi-chart job:** run assess and ask #1 separately for each chart — never batch several charts'
 takeaways into one combined question.
 
-**`additional_datasets_detected` on the result** — the server extracted the image and found more than
-one *unrelated* dataset in it (different measures, not more panels of one dataset), and assessed only
-the first. The candidates you received describe that first dataset alone. This is a signal that the
-crop spanned two genuinely separate charts — not an error, and not something to retry:
+**`additional_datasets_detected` on the result — reconcile before you split.** The server tries to
+re-merge a same-measure/different-slice mis-segmentation on its own before this flag ever reaches
+you, so anything still flagged already failed that reconciliation — but the flag alone does not say
+*why*. Check for a `reason` field: `"unmergeable_slice"` means the server itself believed this was
+one comparison split into slices (period/scenario/source) but couldn't safely re-merge it (mismatched
+categories or units) — treat it as an **under-merge**, not a genuine split, and follow the
+reconciliation guidance below. `"different_measure"` means the server never called it a slice at all
+— the ordinary genuine-split case. An older server without this field carries no `reason` at all;
+treat its absence as "unknown" rather than "genuine split," and fall back to your own Step 0 family
+check below.
 
-- Go back to the view, crop the other chart as its own family, host it, and run assess for it too —
-  then ask #1 separately per chart, as above.
-- Do NOT put the extra datasets to the human using the candidates you have; those candidates do not
-  describe them.
-- If re-cropping isn't possible (the source is no longer available), say plainly that the image held
-  more than one chart and only the first was handled. Never quietly ship one chart as if it were all
-  of them.
+**First, check your own Step 0 family call** (from `becise-chart`, or your own read of the source if
+you cropped it yourself). If you already grouped this crop as one family under the "same measure,
+same categories, differ only by a slice" rule — panels that differ only by period, scenario, or
+source — then the flag most likely means the server's extraction **under-merged** a family you
+correctly grouped, not that you over-grouped two real charts. Revenue-by-channel donuts split by
+July/Accumulated is exactly this shape: same 7 channels, same measure, differing only by period —
+one family, and a split here is the under-merge case.
+
+- **Family call agrees with your Step 0 grouping (the common case): do not crop-split.** Report the
+  mismatch — "the server under-merged this into N datasets; treating it as one family per Step 0" —
+  and, retry budget permitting, re-submit the full crop **once** for reconciliation before falling
+  back to anything else. This reconciliation attempt does not count against the Step 3 retry cap
+  (failures only); it is the slice-family analog of a `needs_clarification` round.
+- **Reconciliation still splits, or a `reason: "different_measure"` is present, or your own read
+  agrees the panels are a genuinely different measure:** now treat it as a real second chart. Go back
+  to the view, crop the other chart as its own family, host it, and run assess for it too — then ask
+  #1 separately per chart, as in the multi-chart case above.
+- **Never ship a single-slice render of a multi-slice family as if it were the whole comparison.** If
+  reconciliation isn't possible (the source crop is no longer available, or the retry budget is
+  spent), say plainly that the chart could not be assembled as one comparison and show what you have
+  labelled for exactly the slice it covers — never silently present July-only as "Revenue by
+  Channel" when the source held July and Accumulated together.
+- Do NOT put the extra datasets to the human using the candidates you have when you've judged this a
+  slice split; those candidates describe only the rendered slice, not the comparison the family was
+  cropped to make.
 
 **If `chart_assess` is not in the tool listing** (older server), fall back to the legacy flow: call
 `rebuild_chart` directly with the human's stated takeaway as `context.story` (soft framing, not the
@@ -123,18 +147,29 @@ per-chart emphasis is always a fresh ask.
 
 ## Step 3 — Rebuild with the locked takeaway
 
-The Step 1 upload URL is **always dead by now** — it expired during the human ask (~300s). Re-host the
-crop file first: mint a fresh pair with `get_upload_url` and run `host-crop.mjs` (in `becise-chart`'s
-dir), then pass its `downloadUrl`. Never reuse the Step 1 URL.
+**Pass Step 1's `assessedData` straight through — do not re-host the image.** `chart_assess`'s result
+carries an opaque `assessedData` field (its own canonical extraction); echo it back verbatim as
+`rebuild_chart`'s `assessedData` parameter. It is JSON, not a presigned URL, so unlike the crop image
+it survives the human ask with no expiry to race. This also means `rebuild_chart` skips its own
+extraction and renders the exact segmentation assess's candidates described — it cannot independently
+re-read the image and disagree with what the human was asked about (the failure mode this whole
+ask/lock contract exists to prevent). Omit `chartImage` entirely in this case.
 
 ```
 rebuild_chart({
-  chartImage: { url: <fresh downloadUrl from host-crop.mjs>, mimeType: "image/png" },
+  assessedData: <Step 1's chart_assess result.assessedData, echoed verbatim>,
   chart_id: <same chart_id>,
   confirmedInsight?: <from the mapping above>,
   emphasisModeHint?: "none"   // only when they picked the comparable/no-standout option
 })
 ```
+
+**Only fall back to re-cropping and sending `chartImage`** when `assessedData` genuinely isn't
+available — an older server whose `chart_assess` result carries no `assessedData` field, or the
+legacy flow (`chart_assess` not installed at all, see Step 1). In that fallback case only, mint a
+fresh `get_upload_url` pair and run `host-crop.mjs` (in `becise-chart`'s dir) — the Step 1 upload URL
+is always dead by now (expired during the ask, ~300s) — and pass the fresh `downloadUrl` as
+`chartImage.url` instead of `assessedData`.
 
 Poll `get_result` on `{state:"pending"}`. Three outcomes:
 
@@ -225,7 +260,7 @@ node <becise-place dir>/render-png.mjs '{"webHtmlPath":"<dir>/<id>.web.html","ou
   legitimately shows near-empty bars with "0" labels — that counts too.
 - **Grossly consistent with the source?** Values you can read off the render should match what you
   sent (right magnitudes, right category count). Judge data integrity only — chart type, colors,
-  layout, and emphasis choice are Becise's call; never re-litigate them.
+  layout, title wording, and emphasis choice are Becise's call; never re-litigate them.
 - Fails either check → that's the chart's one re-run (Step 3's cap). Fails the same way again →
   report it with the check PNG as evidence, publish nothing for that chart.
 - No Chrome / no `becise-place` → publish as normal and note the chart is visually unverified.

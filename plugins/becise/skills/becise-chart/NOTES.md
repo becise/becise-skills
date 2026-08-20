@@ -10,13 +10,29 @@ Verified against real output. Two properties drive the whole client design:
 1. **Not self-contained.** It pulls Chart.js, the date-fns adapter, the datalabels plugin, and the
    Inter font from CDNs. Anything CSP-bound (Artifacts) or offline renders blank until those are
    inlined. That inlining is the one transform `make-bundle.mjs` exists to perform.
-2. **Fluid.** `maintainAspectRatio:false`, `100vw/100vh`, transparent background. Output size is a
+2. **Fluid.** `maintainAspectRatio:false`, `100vw/100vh` on `html,body`. Output size is a
    choice made at render time, not a property of the chart — which is why `render-png.mjs` takes
-   explicit `width`/`height`.
+   explicit `width`/`height`. The **page** may stay transparent; `.chart-shell` paints an opaque
+   surface so labels and muted text have a real contrast background (don't assume the slide behind
+   the iframe is white).
 
 It's also introspectable: an embedded `<script id="becise-metadata">` carries `chart_type`,
 `chart_title`, and `key_insight` (auto-filled into the manifest), and the underlying data sits in a
 `series` const.
+
+## Title block vs gallery chrome
+
+Rebuilt HTML stitches three nodes inside `.chart-shell`:
+
+- `.chart-eyebrow` — operation (`chart_title`, e.g. "Sales Channel · Revenue Share")
+- `h1.chart-title` — the finding (`key_insight`, a sentence, line-clamped)
+- `.chart-footnote` — sort / unit when known
+
+`extractTitle` therefore prefers the eyebrow over the `<h1>` when filling `manifest.title`. Using
+the h1 would put the finding in gallery chrome that the chart already paints. `build-gallery.mjs`
+omits its extra `.insight` paragraph when the mounted markup already has `.chart-eyebrow`; older
+HTML (no eyebrow) still gets the caption. Do not put craft rules in SKILL.md — this is bundler
+behavior only.
 
 ## Why `chart_id`s must be globally unique
 
@@ -61,10 +77,15 @@ different measures (a guest-count gap beside an average-check gap, both "% Chang
 quarters). Matching units and a matching axis are not evidence of one dataset — the *measure* is.
 That shape is why the split rule is keyed on measure rather than on anything easier to detect.
 
-**The server is the check, not you.** It re-decides grouping from the extracted data — strings and
-numbers rather than pixels — and reports disagreement instead of guessing. That is why Step 0 says to
-use judgment and move on rather than agonizing: approximately right is enough, because the expensive
-direction of error is the one the server catches.
+**The server is the check, not you — but the signal can misfire, and `becise-chart-emphasis` owns
+what to do about it.** In practice the server's own extraction pass has mis-segmented a *correctly*
+grouped slice family (same measure, same categories, differing only by period) and raised
+`additional_datasets_detected` on it anyway — the Revenue by Channel donuts (July vs Accumulated) are
+the observed case. The flag is not proof of over-grouping; it is proof the server's dataset count
+disagrees with yours, which is usually but not always because you over-grouped. Do not act on it
+directly here — `becise-chart-emphasis` SKILL.md's `additional_datasets_detected` section is where
+that reconciliation (agree with your Step 0 call vs. treat as a genuine split) happens, and the two
+must stay in sync: the "one family" examples above are exactly the cases that section must protect.
 
 ## Media extraction from a `.pptx`: only when the slide IS the picture
 

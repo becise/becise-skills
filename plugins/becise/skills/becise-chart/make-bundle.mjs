@@ -140,9 +140,22 @@ export function scriptSyntaxErrors(html) {
   return failures;
 }
 
-function extractTitle(html) {
+function stripTags(s) {
+  return String(s).replace(/<[^>]+>/g, '').trim();
+}
+
+// Prefer the operation (eyebrow) over the finding (h1.chart-title). After the
+// chart-visual-craft shell, .chart-title is key_insight — using it as
+// manifest.title would put a sentence in gallery chrome that the chart already
+// paints. Older HTML has no eyebrow; fall through to the h1.
+export function extractTitle(html) {
+  const eyebrow = html.match(/<(?:p|div)[^>]*class=["'][^"']*chart-eyebrow[^"']*["'][^>]*>([\s\S]*?)<\/(?:p|div)>/i);
+  if (eyebrow) {
+    const t = stripTags(eyebrow[1]);
+    if (t) return t;
+  }
   const h1 = html.match(/<h1[^>]*class=["'][^"']*chart-title[^"']*["'][^>]*>([\s\S]*?)<\/h1>/i);
-  return h1 ? h1[1].replace(/<[^>]+>/g, '').trim() : '';
+  return h1 ? stripTags(h1[1]) : '';
 }
 
 // Build the Artifact body-fragment: strip document scaffolding, drop the html/body sizing rule

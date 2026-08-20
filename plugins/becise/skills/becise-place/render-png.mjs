@@ -3,8 +3,8 @@
  * render-png.mjs — becise-place render muscle (neutral, no Becise IP).
  *
  * Rasterize a self-contained becise-chart `web.html` into a PNG at a chosen size.
- * The chart is fluid (100vw/100vh, transparent bg), so output size is a render-time CHOICE —
- * pass width/height. Renders the *web.html* (deps inlined by make-bundle), so it needs no network;
+ * The chart is fluid (100vw/100vh). `.chart-shell` may be opaque; the page may stay transparent.
+ * Output size is a render-time CHOICE — pass width/height. Renders the *web.html* (deps inlined by
  * a dead-proxy render still succeeds.
  *
  * USAGE:  node render-png.mjs '<json>'   |   echo '<json>' | node render-png.mjs
