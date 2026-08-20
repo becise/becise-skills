@@ -123,9 +123,13 @@ per-chart emphasis is always a fresh ask.
 
 ## Step 3 — Rebuild with the locked takeaway
 
+The Step 1 upload URL is **always dead by now** — it expired during the human ask (~300s). Re-host the
+crop file first: mint a fresh pair with `get_upload_url` and run `host-crop.mjs` (in `becise-chart`'s
+dir), then pass its `downloadUrl`. Never reuse the Step 1 URL.
+
 ```
 rebuild_chart({
-  chartImage: { url: <crop downloadUrl>, mimeType: "image/png" },  // same crop as Step 1 (mint a fresh URL if the original expired)
+  chartImage: { url: <fresh downloadUrl from host-crop.mjs>, mimeType: "image/png" },
   chart_id: <same chart_id>,
   confirmedInsight?: <from the mapping above>,
   emphasisModeHint?: "none"   // only when they picked the comparable/no-standout option

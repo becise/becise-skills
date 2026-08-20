@@ -209,11 +209,14 @@ PIL. Missing a tool you need: `pip install pymupdf` / `pip install pillow` (add
 `--break-system-packages` only if pip refuses on a distro-managed Python). Neither available and no
 network → **say so plainly** rather than shipping a bad image.
 
-Render at 2–3× (crops at 3–4×). **Hosting each crop:** `get_upload_url` → `PUT` the bytes
-(`Content-Type: image/png`; plain `--data-binary`, ignore the `crc32` param) → use the returned
-`downloadUrl`. **Presigned URLs expire ~300s** — hand off to `becise-chart-emphasis` promptly, and
-mint a fresh one for any retry there. (The server fetches the URL once at job start, so it only
-needs to survive seconds, but don't cut it fine.)
+Render at 2–3× (crops at 3–4×). **Hosting each crop:** mint a URL pair with `get_upload_url`, then
+upload via `host-crop.mjs` — it validates the PUT (correct `Content-Type`, HTTP 200 check) and echoes
+the `downloadUrl` to reuse:
+`echo '{"crop":"<path>","uploadUrl":"…","downloadUrl":"…"}' | node <SKILL_DIR>/host-crop.mjs`.
+**The durable artifact is the crop FILE, not the URL.** Presigned URLs expire ~300s, so mint
+immediately before the call that consumes it and re-host from the file for any retry — never carry a
+live URL across a wait. `get_upload_url` stays a tool call you make (it carries the server's secret
+token, which never belongs in a script). Hand off to `becise-chart-emphasis` promptly.
 
 ## Step 2 — Hand off to becise-chart-emphasis (do not stop here)
 
