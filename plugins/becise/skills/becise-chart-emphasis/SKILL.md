@@ -51,20 +51,28 @@ different surface.
 
 ## Step 1 — Assess (per chart, no HTML)
 
-For each handed-off chart, call `chart_assess`:
+For each handed-off chart, call `chart_assess`. Use whichever image form `becise-chart` handed you —
+a hosted URL for a larger crop, or **inline base64 `data` for a small one** (≲100KB) that skipped
+hosting, which shaves two round-trips off the front of the pipeline:
 
 ```
 chart_assess({
-  chartImage: { url: <crop downloadUrl>, mimeType: "image/png" },
+  chartImage: { url: <crop downloadUrl>, mimeType: "image/png" },   // larger crop, hosted
+  // OR, for a small crop handed over as a file:
+  // chartImage: { data: <base64 of the crop file>, mimeType: "image/png" },
   chart_id: <the chart_id from becise-chart>,
   context: { text?: <what becise-chart observed around the chart> }
 })
 ```
 
-Poll `get_result` on `{state:"pending"}` — this is fast (extraction + one text call), typically
-under a minute. On `done`, you get `candidate_claims` (2–3 takeaway sentences), a `series_sketch`
-(category/series labels — keep these, you'll need them if a clarification comes up later), and
-`next_step` telling you to stop and ask. **No chart is shown or built at this point.**
+Poll `get_result` on `{state:"pending"}` **with `maxBlockMs: 55000`** (the server max) — one long
+blocking wait usually returns `done` in a single call; do not spin a tight loop of short/zero-block
+polls. The tool schema is already loaded (batched in `becise-chart`'s up-front ToolSearch), so there
+is no ToolSearch stall between submit and poll. This step is the pipeline's slowest — extraction plus
+one text call — typically under a minute. On `done`, you get `candidate_claims` (2–3 takeaway
+sentences), a `series_sketch` (category/series labels — keep these, you'll need them if a
+clarification comes up later), and `next_step` telling you to stop and ask. **No chart is shown or
+built at this point.**
 
 **Multi-chart job:** run assess and ask #1 separately for each chart — never batch several charts'
 takeaways into one combined question.
@@ -171,7 +179,8 @@ fresh `get_upload_url` pair and run `host-crop.mjs` (in `becise-chart`'s dir) �
 is always dead by now (expired during the ask, ~300s) — and pass the fresh `downloadUrl` as
 `chartImage.url` instead of `assessedData`.
 
-Poll `get_result` on `{state:"pending"}`. Three outcomes:
+Poll `get_result` on `{state:"pending"}` with `maxBlockMs: 55000` (the build is the longest server
+step — 2–4 min — so expect several blocking polls; never re-submit a pending job). Three outcomes:
 
 **`emphasis_status: "applied"`** — success, marks punched. Go to Step 4 (bundle).
 
@@ -261,7 +270,13 @@ node <becise-place dir>/render-png.mjs '{"webHtmlPath":"<dir>/<id>.web.html","ou
 - **Grossly consistent with the source?** Values you can read off the render should match what you
   sent (right magnitudes, right category count). Judge data integrity only — chart type, colors,
   layout, title wording, and emphasis choice are Becise's call; never re-litigate them.
-- Fails either check → that's the chart's one re-run (Step 3's cap). Fails the same way again →
+- **Text actually legible, not silently broken?** Two failure modes the bundler and server both
+  guard against but can still slip through: value/axis labels overlapping into unreadable text, and
+  a declared brand webfont (e.g. DM Sans) not actually rendering (falls back to a generic system
+  font instead) — the bundler embeds the font precisely so this shouldn't happen, but a font-family
+  regression upstream would still show up here. This is a defect check, not a style opinion — don't
+  flag a chart's type, color, or layout choice under this bullet.
+- Fails any of the above → that's the chart's one re-run (Step 3's cap). Fails the same way again →
   report it with the check PNG as evidence, publish nothing for that chart.
 - No Chrome / no `becise-place` → publish as normal and note the chart is visually unverified.
 

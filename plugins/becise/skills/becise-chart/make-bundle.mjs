@@ -37,8 +37,54 @@ const VENDOR_MAP = [
   { pkg: 'chartjs-plugin-datalabels',  file: 'chartjs-plugin-datalabels.min.js',       version: '2.2.0' },
 ];
 
+// Brand webfonts vendored for embedding. Unlike VENDOR_MAP (matched against a
+// <script src> URL), a font is matched against the family NAME the chart's own
+// CSS declares — a Google Fonts <link> carries no version to pin, and the font
+// never arrives as a URL the inliner can intercept. Add a row here for each
+// brand font the org theme can declare; the bundled Artifact/web pages have no
+// network access to fetch it live, so embedding is the only way it renders.
+const FONT_MAP = [
+  { family: 'DM Sans', weights: { 400: 'DMSans-Regular.ttf', 700: 'DMSans-Bold.ttf' } },
+];
+
 function readVendor(vendorDir, file) {
   return readFileSync(join(vendorDir, file), 'utf8');
+}
+
+// First family in a CSS font-family stack, quotes stripped:
+// "'DM Sans', Inter, sans-serif" -> "DM Sans"
+function firstFontFamily(stack) {
+  const first = String(stack).split(',')[0].trim();
+  return first.replace(/^['"]|['"]$/g, '');
+}
+
+// Embed a vendored brand webfont as a base64 @font-face when the chart's own
+// html,body CSS rule declares one we carry in FONT_MAP. Detection reads the
+// SAME value the chart declares — not a hardcoded org assumption — so this
+// works for whichever brand font is actually in play, not just the current
+// one. Prepends into the EXISTING <style> block (never adds a second one):
+// toArtifactFragment assumes exactly one <style> element in <head>, and a
+// second block would silently steal that extraction, dropping every real
+// chart-shell/title/legend rule from the Artifact fragment.
+function embedBrandFont(html, vendorDir) {
+  const m = html.match(/html\s*,\s*body\s*\{[^}]*font-family:\s*([^;]+);/i);
+  if (!m) return { html, embedded: null };
+  const hit = FONT_MAP.find(f => f.family === firstFontFamily(m[1]));
+  if (!hit) return { html, embedded: null };
+
+  const faces = Object.entries(hit.weights).map(([weight, file]) => {
+    const b64 = readFileSync(join(vendorDir, file)).toString('base64');
+    return `@font-face { font-family: '${hit.family}'; font-weight: ${weight}; font-style: normal; ` +
+      `src: url(data:font/ttf;base64,${b64}) format('truetype'); }`;
+  }).join('\n');
+
+  const embedded = /<style[^>]*>/i.test(html)
+    ? html.replace(/<style([^>]*)>/i, (_tag, attrs) => `<style${attrs}>\n${faces}\n`)
+    : /<head[^>]*>/i.test(html)
+      ? html.replace(/<head[^>]*>/i, (tag) => `${tag}\n<style>\n${faces}\n</style>\n`)
+      : `<style>\n${faces}\n</style>\n${html}`;
+
+  return { html: embedded, embedded: hit.family };
 }
 
 // The version the page's CDN URL actually asks for, e.g. ".../chart.js@4.4.7/dist/..." -> "4.4.7".
@@ -57,6 +103,9 @@ function requestedVersion(src, pkg) {
 function inlineExternals(html, vendorDir) {
   const deps = [];
   const warnings = [];
+
+  const { html: withFont, embedded: embeddedFont } = embedBrandFont(html, vendorDir);
+  html = withFont;
 
   html = html.replace(/<script\b[^>]*\bsrc\s*=\s*(["'])(.*?)\1[^>]*>\s*<\/script>/gi, (whole, _q, src) => {
     if (!/^https?:\/\//i.test(src)) return whole; // already local/inline
@@ -79,10 +128,15 @@ function inlineExternals(html, vendorDir) {
     return whole;
   });
 
-  // Nudge the CSS font fallback (harmless if 'Inter' isn't installed).
-  html = html.replaceAll("'Inter', sans-serif", FONT_STACK);
+  // No brand font vendored for this chart's declared family — nudge the CSS
+  // fallback to robust, near-universally-installed system fonts instead.
+  // (Skipped when a brand font was embedded above: that font IS present, so
+  // swapping the fallback stack out from under it would be pointless.)
+  if (!embeddedFont) {
+    html = html.replaceAll('Inter, sans-serif', FONT_STACK);
+  }
 
-  return { html, deps, warnings };
+  return { html, deps, warnings, embeddedFont };
 }
 
 // The server has been observed emitting the prompt's literal placeholders as metadata

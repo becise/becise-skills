@@ -29,13 +29,17 @@ function check(name, fn) {
 function assert(cond, msg) { if (!cond) throw new Error(msg); }
 
 // A Becise-shaped chart page. `quote` lets us prove the inliner isn't quote-sensitive.
-function chartHtml({ title, quote = '"' } = {}) {
+// `fontFamily` lets a test declare the org theme's font, same as the real chart's
+// html,body CSS rule — defaults to the un-embeddable default (Inter) so every
+// existing fixture is unaffected by the brand-font-embedding tests below it.
+function chartHtml({ title, quote = '"', fontFamily = 'Inter, sans-serif' } = {}) {
   const q = quote;
   return `<!DOCTYPE html><html><head>
 <script id="becise-metadata" type="application/json">${JSON.stringify({ chart_type: 'bar', chart_title: title, key_insight: `${title} insight` })}</script>
 <script src=${q}https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js${q}></script>
 <link href=${q}https://fonts.googleapis.com/css2?family=Inter${q} rel="stylesheet" />
-<style>html,body{width:100vw;height:100vh;background:transparent}</style></head>
+<style>html,body{width:100vw;height:100vh;background:transparent;font-family:${fontFamily};}
+.chart-shell{padding:8px}.chart-title{font-weight:700}</style></head>
 <body><div class="chart-shell"><h1 class="chart-title">${title}</h1><canvas id="c"></canvas></div>
 <script>const series=[{x:'A',y:1},{x:'B',y:2}];
 new Chart(document.getElementById('c'),{type:'bar',data:{}});
@@ -143,6 +147,45 @@ check('vendor version mismatch is warned, not silently inlined', () => {
   writeFileSync(raw, chartHtml({ title: 'Bumped' }).replace('chart.js@4.4.7', 'chart.js@4.9.9'));
   const m = run(MAKE, { outDir: dir('ver'), charts: [{ chart_id: 'ver', rawHtmlPath: raw }] });
   assert(m.warnings.some(w => /VENDOR VERSION MISMATCH/.test(w)), `expected a mismatch warning, got: ${m.warnings.join('; ')}`);
+});
+
+// 2b. A chart declaring a vendored brand font (DM Sans) must actually render in
+//     it — the font-never-loads regression: a bug upstream (malformed
+//     font-family quoting) plus a bundler that only ever swapped in the Inter
+//     fallback stack meant a branded org's chart silently rendered in the
+//     browser default, invisibly, on every chart. This is the bundler's own
+//     line of defense regardless of whether the upstream bug is fixed.
+check('a chart declaring a vendored brand font gets it embedded as @font-face', () => {
+  const raw = dir('dmsans.raw.html');
+  writeFileSync(raw, chartHtml({ title: 'Branded', fontFamily: "'DM Sans', Inter, sans-serif" }));
+  const m = run(MAKE, { outDir: dir('dmsans'), charts: [{ chart_id: 'dmsans', rawHtmlPath: raw }] });
+  const web = readFileSync(join(dir('dmsans'), 'dmsans.web.html'), 'utf8');
+  assert(/@font-face/.test(web), 'expected an embedded @font-face rule');
+  assert(/font-family:\s*'DM Sans'/.test(web), 'the @font-face must declare the DM Sans family');
+  assert(/src:\s*url\(data:font\/ttf;base64,/.test(web), 'the font must be embedded as a base64 data URI, not linked');
+  assert(!/fonts\.googleapis\.com/.test(web), 'the Google Fonts link must still be stripped');
+  // Effective declared family must still be DM Sans — not silently replaced by
+  // the Inter fallback stack (that swap only applies when no brand font matched).
+  assert(/font-family:\s*'DM Sans',\s*Inter,\s*sans-serif/.test(web), `declared family must remain DM Sans, got no match in: ${web.match(/html\s*,\s*body\s*\{[^}]*\}/)?.[0]}`);
+});
+
+check('embedding a brand font does not steal toArtifactFragment\'s single <style> extraction', () => {
+  const raw = dir('dmsans2.raw.html');
+  writeFileSync(raw, chartHtml({ title: 'Branded 2', fontFamily: "'DM Sans', Inter, sans-serif" }));
+  const m = run(MAKE, { outDir: dir('dmsans2'), charts: [{ chart_id: 'dmsans2', rawHtmlPath: raw }] });
+  const artifact = readFileSync(join(dir('dmsans2'), 'dmsans2.artifact.html'), 'utf8');
+  assert(/@font-face/.test(artifact), 'the artifact fragment must carry the embedded font too');
+  assert(/\.chart-title\s*\{/.test(artifact), 'the real chart-shell CSS must survive alongside the font-face rule');
+  assert(scriptSyntaxErrors(artifact).length === 0, 'artifact.html scripts must still parse');
+});
+
+check('a chart with no vendored brand font keeps the existing Inter-fallback behavior', () => {
+  const raw = dir('nodmsans.raw.html');
+  writeFileSync(raw, chartHtml({ title: 'Unbranded' })); // default fontFamily: 'Inter, sans-serif'
+  const m = run(MAKE, { outDir: dir('nodmsans'), charts: [{ chart_id: 'nodmsans', rawHtmlPath: raw }] });
+  const web = readFileSync(join(dir('nodmsans'), 'nodmsans.web.html'), 'utf8');
+  assert(!/@font-face/.test(web), 'no font should be embedded when the declared family is not vendored');
+  assert(/system-ui/.test(web), 'the existing Inter fallback-stack nudge should still apply unchanged');
 });
 
 // 3. All-fallback must still produce a manifest recording what was attempted.

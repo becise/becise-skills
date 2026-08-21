@@ -28,6 +28,17 @@ into it for every kept family; do not stop and wait for further instructions.
 
 Background and rationale live in `NOTES.md` next to this file. Read it when something surprises you.
 
+## Before you start — load every becise tool in ONE ToolSearch
+
+The becise MCP tools are deferred; each needs its schema loaded before the first call. Load **all of
+them the pipeline will use in a single ToolSearch**, at job start, before the first crop:
+`select:mcp__becise__get_upload_url,mcp__becise__chart_assess,mcp__becise__get_result,mcp__becise__rebuild_chart`.
+One round-trip instead of three, and no ToolSearch stall between `chart_assess` and its `get_result`
+poll. **Never reload a tool schema mid-session hoping it changed** — it won't. If a becise tool
+returns an empty schema (`{properties:{}}`) or rejects an object arg with `expected object, received
+string`, that is a server schema-publication bug, not a transient: stop and report it, do not retry
+or reload.
+
 ## Where the scripts live
 
 Commands write `<SKILL_DIR>` for the directory holding this SKILL.md — substitute the path you
@@ -86,6 +97,13 @@ text) to drop title/text/table pages, then eyeball only candidates; montage many
 contact sheet rather than reading each. **If the user named the view** ("the chart on slide 5"),
 skip triage entirely and go straight to that one. **If nothing is chartable, stop** and say so.
 
+**Fast path — a single already-tight chart image.** When the source is ONE image that is essentially
+just the chart already (a screenshot or exported PNG, not a slide/PDF/dashboard and not a multi-panel
+montage), skip the triage / contact-sheet / family-grouping machinery entirely: read it once to
+confirm it is a chart and to spot any page chrome (title bar, logo, surrounding copy), then go
+straight to Step 1 with a single family. Crop only if chrome is present; if the frame is already just
+the chart, no crop is needed at all.
+
 ## Step 1 — Ingest and CROP: one image per family
 
 Both `chart_assess` and `rebuild_chart` (called by `becise-chart-emphasis`, not here) take **the
@@ -117,8 +135,10 @@ URL, not a path; a huge file may return base64-in-JSON → `jq -r .content | bas
 - **PDF-rendered views:** PyMuPDF `clip` renders the crop directly at high scale —
   `python3 -c "import fitz; d=fitz.open('in.pdf'); d[3].get_pixmap(matrix=fitz.Matrix(4,4), clip=fitz.Rect(x0,y0,x1,y1)).save('crop.png')"`
   (clip coords are in the page's point space — view the full render first and scale your estimate).
-- **Raw images (thumbnails, screenshots):** PIL —
-  `python3 -c "from PIL import Image; Image.open('view.png').crop((x0,y0,x1,y1)).save('crop.png')"`
+- **Raw images (thumbnails, screenshots):** PIL, in **ONE call** — read dimensions, crop, cap the
+  size, save, and print the final dims all at once. Never run a separate dimension-probe call first;
+  estimate the box from the image you already looked at and let the crop clamp to the real bounds:
+  `python3 -c "from PIL import Image; im=Image.open('view.png'); W,H=im.size; c=im.crop((max(0,x0),max(0,y0),min(W,x1),min(H,y1))); c.thumbnail((1500,1500)); c.save('crop.png'); print(c.size)"`
   (`fitz` can also open plain images if PIL is missing).
 
 **Must be INSIDE the crop** — anything needed to decode a value or name a panel:
@@ -209,10 +229,21 @@ PIL. Missing a tool you need: `pip install pymupdf` / `pip install pillow` (add
 `--break-system-packages` only if pip refuses on a distro-managed Python). Neither available and no
 network → **say so plainly** rather than shipping a bad image.
 
-Render at 2–3× (crops at 3–4×). **Hosting each crop:** mint a URL pair with `get_upload_url`, then
-upload via `host-crop.mjs` — it validates the PUT (correct `Content-Type`, HTTP 200 check) and echoes
-the `downloadUrl` to reuse:
-`echo '{"crop":"<path>","uploadUrl":"…","downloadUrl":"…"}' | node <SKILL_DIR>/host-crop.mjs`.
+Render at 2–3× (crops at 3–4×), **but cap the crop that leaves this skill at ~1500px longest side**
+(the `thumbnail((1500,1500))` in the crop command above). `chart_assess`'s vision extraction is the
+slowest step in the whole pipeline and its latency scales with image size; a 3–4× slide render is
+multi-MB and buys no accuracy. The one floor: never shrink so far that the smallest data label (a
+"0%"/"1%" slice tag) blurs — if the crop has tiny labels, keep it larger and re-check by eye.
+
+**Two ways to get the crop to `chart_assess`, pick by size:**
+
+- **Small crop (≲100KB): skip hosting, hand the FILE over.** Pass the crop's local path to
+  `becise-chart-emphasis`; it inlines the bytes as base64 `data` on `chart_assess` directly. This
+  drops `get_upload_url` **and** `host-crop.mjs` — two round-trips gone before the assess even starts.
+- **Larger crop: host it.** Mint a URL pair with `get_upload_url`, then upload via `host-crop.mjs` —
+  it validates the PUT (correct `Content-Type`, HTTP 200 check) and echoes the `downloadUrl` to reuse:
+  `echo '{"crop":"<path>","uploadUrl":"…","downloadUrl":"…"}' | node <SKILL_DIR>/host-crop.mjs`.
+
 **The durable artifact is the crop FILE, not the URL.** Presigned URLs expire ~300s, so mint
 immediately before the call that consumes it and re-host from the file for any retry — never carry a
 live URL across a wait. `get_upload_url` stays a tool call you make (it carries the server's secret
@@ -227,7 +258,8 @@ to ask again, and don't SHOW, bundle, or call `chart_assess`/`rebuild_chart` you
 Pass along, per chart:
 
 - `chart_id` — the job-wide-unique id from Step 0
-- the crop `downloadUrl` (or the crop bytes, if you'd rather re-host)
+- the crop: a hosted `downloadUrl` for a larger crop, **or the crop's local file path** for a small
+  one (≲100KB) so emphasis can inline it and skip hosting — see the two-ways note in Step 1
 - anything you observed about where the chart lives and what surrounds it (you saw the full view —
   describe it in your own words; `becise-chart-emphasis` uses this as soft framing, never as the
   locked takeaway)
