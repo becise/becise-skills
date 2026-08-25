@@ -276,6 +276,13 @@ node <becise-place dir>/render-png.mjs '{"webHtmlPath":"<dir>/<id>.web.html","ou
   font instead) — the bundler embeds the font precisely so this shouldn't happen, but a font-family
   regression upstream would still show up here. This is a defect check, not a style opinion — don't
   flag a chart's type, color, or layout choice under this bullet.
+- **Line / small-multiple readability + emphasis (defect checks only).** On a line or facet render:
+  every quantitative panel must be readable — value-axis tick labels present, or every point on that
+  panel directly labelled; a panel with marks but no readable scale fails. And when the locked claim
+  is temporal/directional (names a period or a rise/fall — e.g. "Q3 declined"), the render must show
+  that emphasis: a shaded region wash or a recolored line segment. A directional claim that came back
+  with no visible wash/segment (server `emphasis_status: "none"`) fails this check. Do NOT fail a
+  chart over panel order or axis baseline — those are the server's layout call, not re-litigated here.
 - Fails any of the above → that's the chart's one re-run (Step 3's cap). Fails the same way again →
   report it with the check PNG as evidence, publish nothing for that chart.
 - No Chrome / no `becise-place` → publish as normal and note the chart is visually unverified.
