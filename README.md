@@ -76,9 +76,9 @@ plugins/
 
 5. **Commit and push.** Anyone with the marketplace already added picks up new/updated skills via `/plugin marketplace update becise-skills`.
 
-## After installing: connect the Becise MCP server
+## The bundled Becise MCP server
 
-The `becise` plugin's skills call the Becise MCP server (tool `chart_critique`). That server is a
-separate custom connector — the plugin does not bundle it. In Claude Desktop: **Settings →
-Connectors → Add custom connector**, paste the Becise MCP URL, and authenticate with the provided
-credentials. Confirm with *"Do you have the Becise chart tools available?"*
+The `becise` plugin ships `plugins/becise/.mcp.json`, so installing the plugin registers the
+Becise MCP server (`https://becise.io/mcp`) automatically. First use triggers an OAuth login —
+approve it when prompted, or run `/mcp` and authenticate the `becise` server. Confirm with
+*"Do you have the Becise chart tools available?"*

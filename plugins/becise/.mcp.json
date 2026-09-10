@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "becise": {
+      "type": "http",
+      "url": "https://becise.io/mcp"
+    }
+  }
+}
