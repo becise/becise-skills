@@ -8,7 +8,11 @@
     {
       "name": "becise",
       "source": "./plugins/becise",
-      "description": "Rebuild charts via Becise MCP, place into Slides/Docs or PNG, and orchestrate slide-revision-v2 (human job/claim ask, critique consent, then build)."
+      "description": "Rebuild charts via Becise MCP, place into Slides/Docs or PNG, and orchestrate slide-revision-v2 (human job/claim ask, critique consent, then build).",
+      "author": {
+        "name": "Becise",
+        "email": "prod@becise.com"
+      }
     }
   ]
 }
